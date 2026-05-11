@@ -1,0 +1,379 @@
+import Foundation
+
+public struct LauncherBuildInput: Equatable, Sendable {
+    public var targetAppPath: String
+    public var targetExecutablePath: String
+    public var settingsPath: String
+    public var profile: LauncherProfile
+
+    public init(targetAppPath: String, targetExecutablePath: String, settingsPath: String, profile: LauncherProfile = .environment) {
+        self.targetAppPath = targetAppPath
+        self.targetExecutablePath = targetExecutablePath
+        self.settingsPath = settingsPath
+        self.profile = profile
+    }
+}
+
+public enum LauncherScriptBuilder {
+    public static func script(input: LauncherBuildInput) -> String {
+        """
+        #!/bin/zsh
+        set -u
+
+        SETTINGS_FILE=\(input.settingsPath.zshSingleQuoted())
+        TARGET_APP=\(input.targetAppPath.zshSingleQuoted())
+        TARGET_EXECUTABLE=\(input.targetExecutablePath.zshSingleQuoted())
+        LAUNCHER_PROFILE=\(input.profile.rawValue.zshSingleQuoted())
+
+        read_json() {
+          /usr/bin/plutil -extract "$1" raw -o - "$SETTINGS_FILE" 2>/dev/null || printf "%s" "$2"
+        }
+
+        proxy_host="$(read_json proxyHost "127.0.0.1")"
+        socks5_port="$(read_json socks5Port "1080")"
+        http_port="$(read_json httpPort "8080")"
+        proxy_mode="$(read_json proxyMode "socks5AndHTTP")"
+        no_proxy="$(read_json noProxy "127.0.0.1,localhost,::1")"
+
+        http_proxy_url="http://${proxy_host}:${http_port}"
+        socks_proxy_url="socks5h://${proxy_host}:${socks5_port}"
+
+        case "$proxy_mode" in
+          socks5)
+            primary_proxy="$socks_proxy_url"
+            all_proxy="$socks_proxy_url"
+            chromium_proxy_url="socks5://${proxy_host}:${socks5_port}"
+            ;;
+          socks5AndHTTP)
+            primary_proxy="$http_proxy_url"
+            all_proxy="$socks_proxy_url"
+            chromium_proxy_url="$http_proxy_url"
+            ;;
+          *)
+            primary_proxy="$http_proxy_url"
+            all_proxy="$http_proxy_url"
+            chromium_proxy_url="$http_proxy_url"
+            ;;
+        esac
+
+        export HTTP_PROXY="$primary_proxy"
+        export HTTPS_PROXY="$HTTP_PROXY"
+        export http_proxy="$HTTP_PROXY"
+        export https_proxy="$HTTP_PROXY"
+        export ALL_PROXY="$all_proxy"
+        export all_proxy="$ALL_PROXY"
+        export FTP_PROXY="$primary_proxy"
+        export ftp_proxy="$FTP_PROXY"
+        export grpc_proxy="$primary_proxy"
+        export NO_PROXY="$no_proxy"
+        export no_proxy="$NO_PROXY"
+
+        args=("$@")
+        case "$LAUNCHER_PROFILE" in
+          chromium)
+            chromium_bypass_list="$(printf "%s" "$no_proxy" | /usr/bin/sed 's/,/;/g')"
+            args=("--proxy-server=${chromium_proxy_url}" "--proxy-bypass-list=${chromium_bypass_list}" "$@")
+            ;;
+          java)
+            java_no_proxy="$(printf "%s" "$no_proxy" | /usr/bin/sed -e 's/[[:space:]]//g' -e 's/,/|/g')"
+            if [ "$proxy_mode" = "socks5" ]; then
+              java_proxy_options="-DsocksProxyHost=${proxy_host} -DsocksProxyPort=${socks5_port} -Dhttp.nonProxyHosts=${java_no_proxy}"
+            else
+              java_proxy_options="-Dhttp.proxyHost=${proxy_host} -Dhttp.proxyPort=${http_port} -Dhttps.proxyHost=${proxy_host} -Dhttps.proxyPort=${http_port} -Dhttp.nonProxyHosts=${java_no_proxy}"
+            fi
+            if [ -n "${JAVA_TOOL_OPTIONS:-}" ]; then
+              export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS} ${java_proxy_options}"
+            else
+              export JAVA_TOOL_OPTIONS="$java_proxy_options"
+            fi
+            ;;
+        esac
+
+        exec "$TARGET_EXECUTABLE" "${args[@]}"
+        """
+    }
+}
+
+public final class LauncherManager: @unchecked Sendable {
+    private let fileManager: FileManager
+    private let store: SettingsStore
+
+    public init(store: SettingsStore, fileManager: FileManager = .default) {
+        self.store = store
+        self.fileManager = fileManager
+    }
+
+    public func createLauncher(targetAppURL: URL, destinationDirectory: URL) throws -> LauncherRecord {
+        let targetExecutableURL = try Self.executableURL(forApp: targetAppURL)
+        let profile = try Self.suggestedProfile(forApp: targetAppURL)
+        let displayName = targetAppURL.deletingPathExtension().lastPathComponent
+        let launcherName = "\(displayName) Proxy.app"
+        let launcherURL = destinationDirectory.appendingPathComponent(launcherName, isDirectory: true)
+        let contentsURL = launcherURL.appendingPathComponent("Contents", isDirectory: true)
+        let macOSURL = contentsURL.appendingPathComponent("MacOS", isDirectory: true)
+        let launcherExecutableURL = macOSURL.appendingPathComponent("launcher")
+
+        try fileManager.createDirectory(at: macOSURL, withIntermediateDirectories: true)
+
+        let script = LauncherScriptBuilder.script(input: LauncherBuildInput(
+            targetAppPath: targetAppURL.path,
+            targetExecutablePath: targetExecutableURL.path,
+            settingsPath: store.settingsURL.path,
+            profile: profile
+        ))
+        try script.write(to: launcherExecutableURL, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: launcherExecutableURL.path)
+
+        let bundleIdentifier = try Self.bundleIdentifier(forApp: targetAppURL)
+        let info = makeInfoPlist(
+            displayName: "\(displayName) Proxy",
+            launcherExecutable: "launcher",
+            bundleIdentifier: Self.launcherBundleIdentifier(targetBundleIdentifier: bundleIdentifier, launcherURL: launcherURL),
+            targetAppPath: targetAppURL.path,
+            profile: profile
+        )
+        let infoData = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        try infoData.write(to: contentsURL.appendingPathComponent("Info.plist"), options: [.atomic])
+
+        return LauncherRecord(
+            displayName: "\(displayName) Proxy",
+            targetAppPath: targetAppURL.path,
+            launcherAppPath: launcherURL.path,
+            bundleIdentifier: bundleIdentifier,
+            launcherProfile: profile,
+            managedByTool: true
+        )
+    }
+
+    public func refreshIndex(searchDirectories: [URL]? = nil) throws -> LauncherIndex {
+        var index = store.loadLauncherIndex()
+        let directories = searchDirectories ?? defaultSearchDirectories()
+
+        for directory in directories where fileManager.fileExists(atPath: directory.path) {
+            let entries = (try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+            for appURL in entries where appURL.pathExtension == "app" {
+                if let record = try? Self.identifyLauncher(at: appURL) {
+                    index.upsert(record)
+                }
+            }
+        }
+
+        index.launchers.removeAll { !fileManager.fileExists(atPath: $0.launcherAppPath) }
+        try store.saveLauncherIndex(index)
+        return index
+    }
+
+    public func removeFromIndex(launcherPath: String) throws -> LauncherIndex {
+        var index = store.loadLauncherIndex()
+        index.remove(path: launcherPath)
+        try store.saveLauncherIndex(index)
+        return index
+    }
+
+    public static func identifyLauncher(at appURL: URL) throws -> LauncherRecord? {
+        let infoURL = appURL.appendingPathComponent("Contents/Info.plist")
+        guard let info = NSDictionary(contentsOf: infoURL) as? [String: Any] else {
+            return nil
+        }
+
+        let name = (info["CFBundleDisplayName"] as? String)
+            ?? (info["CFBundleName"] as? String)
+            ?? appURL.deletingPathExtension().lastPathComponent
+
+        if let targetPath = info["CNPacTargetAppPath"] as? String {
+            let profile = (info["CNPacLauncherProfile"] as? String).flatMap(LauncherProfile.init(rawValue:))
+            return LauncherRecord(
+                displayName: name,
+                targetAppPath: targetPath,
+                launcherAppPath: appURL.path,
+                bundleIdentifier: info["CFBundleIdentifier"] as? String,
+                launcherProfile: profile,
+                managedByTool: true
+            )
+        }
+
+        let executable = (info["CFBundleExecutable"] as? String) ?? "launcher"
+        let scriptURL = appURL.appendingPathComponent("Contents/MacOS/\(executable)")
+        guard let script = try? String(contentsOf: scriptURL), script.contains("HTTP_PROXY") else {
+            return nil
+        }
+
+        let targetPath = inferredTargetAppPath(fromLauncherScript: script) ?? ""
+        guard !targetPath.isEmpty || name.localizedCaseInsensitiveContains("proxy") else {
+            return nil
+        }
+
+        return LauncherRecord(
+            displayName: name,
+            targetAppPath: targetPath,
+            launcherAppPath: appURL.path,
+            bundleIdentifier: info["CFBundleIdentifier"] as? String,
+            launcherProfile: inferredProfile(fromLauncherScript: script),
+            managedByTool: false
+        )
+    }
+
+    public static func suggestedProfile(forApp appURL: URL) throws -> LauncherProfile {
+        let infoURL = appURL.appendingPathComponent("Contents/Info.plist")
+        guard let info = NSDictionary(contentsOf: infoURL) as? [String: Any] else {
+            return .environment
+        }
+
+        let bundleIdentifier = (info["CFBundleIdentifier"] as? String)?.lowercased() ?? ""
+        if bundleIdentifier == "com.apple.safari" || bundleIdentifier.hasPrefix("com.apple.") {
+            return .systemProxyPreferred
+        }
+
+        if isChromiumFamily(appURL: appURL, info: info) {
+            return .chromium
+        }
+
+        if isJavaApp(appURL: appURL, info: info) {
+            return .java
+        }
+
+        return .environment
+    }
+
+    public static func inferredTargetAppPath(fromLauncherScript script: String) -> String? {
+        let lines = script.split(whereSeparator: \.isNewline).map(String.init)
+        let execLine = lines.first { $0.trimmingCharacters(in: .whitespaces).hasPrefix("exec ") }
+        guard let execLine else {
+            return nil
+        }
+
+        let pattern = #"(\/.*?\.app)\/Contents\/MacOS\/[^\s"]+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: execLine, range: NSRange(location: 0, length: (execLine as NSString).length)),
+              match.numberOfRanges > 1 else {
+            return nil
+        }
+        return (execLine as NSString).substring(with: match.range(at: 1))
+    }
+
+    public static func inferredProfile(fromLauncherScript script: String) -> LauncherProfile? {
+        let pattern = #"LAUNCHER_PROFILE='([^']+)'"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: script, range: NSRange(location: 0, length: (script as NSString).length)),
+              match.numberOfRanges > 1 else {
+            return nil
+        }
+        let rawValue = (script as NSString).substring(with: match.range(at: 1))
+        return LauncherProfile(rawValue: rawValue)
+    }
+
+    public static func executableURL(forApp appURL: URL) throws -> URL {
+        let infoURL = appURL.appendingPathComponent("Contents/Info.plist")
+        guard let info = NSDictionary(contentsOf: infoURL) as? [String: Any],
+              let executableName = info["CFBundleExecutable"] as? String else {
+            throw LauncherError.missingExecutable(appURL.path)
+        }
+        let executableURL = appURL.appendingPathComponent("Contents/MacOS/\(executableName)")
+        guard FileManager.default.fileExists(atPath: executableURL.path) else {
+            throw LauncherError.missingExecutable(executableURL.path)
+        }
+        return executableURL
+    }
+
+    private static func bundleIdentifier(forApp appURL: URL) throws -> String? {
+        let infoURL = appURL.appendingPathComponent("Contents/Info.plist")
+        guard let info = NSDictionary(contentsOf: infoURL) as? [String: Any] else {
+            return nil
+        }
+        return info["CFBundleIdentifier"] as? String
+    }
+
+    private static func isChromiumFamily(appURL: URL, info: [String: Any]) -> Bool {
+        if info["ElectronAsarIntegrity"] != nil {
+            return true
+        }
+
+        let bundleIdentifier = (info["CFBundleIdentifier"] as? String)?.lowercased() ?? ""
+        let executable = (info["CFBundleExecutable"] as? String)?.lowercased() ?? ""
+        let appName = appURL.deletingPathExtension().lastPathComponent.lowercased()
+        let markers = ["electron", "chromium", "cef", "qtwebengine"]
+        if markers.contains(where: { bundleIdentifier.contains($0) || executable.contains($0) || appName.contains($0) }) {
+            return true
+        }
+
+        let markerPaths = [
+            "Contents/Resources/app.asar",
+            "Contents/Frameworks/Electron Framework.framework",
+            "Contents/Frameworks/Chromium Embedded Framework.framework",
+            "Contents/Frameworks/QtWebEngineCore.framework",
+            "Contents/Frameworks/QtWebEngineWidgets.framework"
+        ]
+        return markerPaths.contains { FileManager.default.fileExists(atPath: appURL.appendingPathComponent($0).path) }
+    }
+
+    private static func isJavaApp(appURL: URL, info: [String: Any]) -> Bool {
+        if info["JVMOptions"] != nil || info["JVMRuntime"] != nil || info["Java"] != nil {
+            return true
+        }
+
+        let bundleIdentifier = (info["CFBundleIdentifier"] as? String)?.lowercased() ?? ""
+        let executable = (info["CFBundleExecutable"] as? String)?.lowercased() ?? ""
+        if bundleIdentifier.contains("jetbrains") || executable.contains("java") || executable.contains("jdk") {
+            return true
+        }
+
+        let markerPaths = [
+            "Contents/Info.plist/Java",
+            "Contents/MacOS/JavaAppLauncher",
+            "Contents/PlugIns/jre",
+            "Contents/PlugIns/jdk",
+            "Contents/runtime"
+        ]
+        return markerPaths.contains { FileManager.default.fileExists(atPath: appURL.appendingPathComponent($0).path) }
+    }
+
+    private func makeInfoPlist(displayName: String, launcherExecutable: String, bundleIdentifier: String, targetAppPath: String, profile: LauncherProfile) -> [String: Any] {
+        [
+            "CFBundleName": displayName,
+            "CFBundleDisplayName": displayName,
+            "CFBundleIdentifier": bundleIdentifier,
+            "CFBundleExecutable": launcherExecutable,
+            "CFBundlePackageType": "APPL",
+            "CFBundleInfoDictionaryVersion": "6.0",
+            "LSMinimumSystemVersion": "13.0",
+            "CNPacMenubarManaged": true,
+            "CNPacTargetAppPath": targetAppPath,
+            "CNPacLauncherProfile": profile.rawValue,
+            "CNPacSettingsPath": store.settingsURL.path
+        ]
+    }
+
+    private static func launcherBundleIdentifier(targetBundleIdentifier: String?, launcherURL: URL) -> String {
+        let base = (targetBundleIdentifier ?? launcherURL.deletingPathExtension().lastPathComponent)
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9.]+"#, with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-."))
+        return "local.cn-pac-menubar.launcher.\(base).\(UUID().uuidString.prefix(8).lowercased())"
+    }
+
+    private func defaultSearchDirectories() -> [URL] {
+        var directories: [URL] = []
+        if let userApplications = fileManager.urls(for: .applicationDirectory, in: .userDomainMask).first {
+            directories.append(userApplications)
+        }
+        directories.append(URL(fileURLWithPath: "/Applications", isDirectory: true))
+        return directories
+    }
+}
+
+public enum LauncherError: LocalizedError, Equatable {
+    case missingExecutable(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingExecutable(let path):
+            return "Unable to find app executable at \(path)."
+        }
+    }
+}
+
+extension String {
+    func zshSingleQuoted() -> String {
+        "'\(replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
