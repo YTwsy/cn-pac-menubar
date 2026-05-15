@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             store = try SettingsStore()
             settings = store.loadSettings()
             launcherManager = LauncherManager(store: store)
-            launcherIndex = (try? launcherManager.refreshIndex()) ?? store.loadLauncherIndex()
+            launcherIndex = store.loadLauncherIndex()
             try store.saveSettings(settings)
         } catch {
             showError(error)
@@ -214,7 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let item = NSMenuItem(title: "Launchers", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         submenu.addItem(actionItem("Create Launcher...", #selector(createLauncher)))
-        submenu.addItem(actionItem("Refresh Launcher List", #selector(refreshLaunchers)))
+        submenu.addItem(actionItem("Refresh Managed Launchers", #selector(refreshLaunchers)))
         submenu.addItem(.separator())
 
         if launcherIndex.launchers.isEmpty {
@@ -510,7 +510,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func refreshLaunchers() {
         do {
-            launcherIndex = try launcherManager.refreshIndex()
+            launcherIndex = try launcherManager.refreshManagedLaunchers()
         } catch {
             showError(error)
         }

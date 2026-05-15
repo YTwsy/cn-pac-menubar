@@ -148,20 +148,31 @@ public final class LauncherManager: @unchecked Sendable {
         )
     }
 
-    public func refreshIndex(searchDirectories: [URL]? = nil) throws -> LauncherIndex {
+    public func refreshManagedLaunchers() throws -> LauncherIndex {
         var index = store.loadLauncherIndex()
-        let directories = searchDirectories ?? defaultSearchDirectories()
-
-        for directory in directories where fileManager.fileExists(atPath: directory.path) {
-            let entries = (try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
-            for appURL in entries where appURL.pathExtension == "app" {
-                if let record = try? Self.identifyLauncher(at: appURL) {
-                    index.upsert(record)
-                }
+        index.launchers = index.launchers.compactMap { record in
+            guard fileManager.fileExists(atPath: record.launcherAppPath) else {
+                return nil
             }
-        }
 
-        index.launchers.removeAll { !fileManager.fileExists(atPath: $0.launcherAppPath) }
+            let launcherURL = URL(fileURLWithPath: record.launcherAppPath, isDirectory: true)
+            guard let managedRecord = try? Self.identifyManagedLauncher(at: launcherURL) else {
+                return record
+            }
+
+            return LauncherRecord(
+                id: record.id,
+                displayName: managedRecord.displayName,
+                targetAppPath: managedRecord.targetAppPath,
+                launcherAppPath: managedRecord.launcherAppPath,
+                bundleIdentifier: managedRecord.bundleIdentifier,
+                launcherProfile: managedRecord.launcherProfile,
+                createdAt: record.createdAt,
+                lastLaunchedAt: record.lastLaunchedAt,
+                managedByTool: managedRecord.managedByTool
+            )
+        }
+        index.launchers.sort { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
         try store.saveLauncherIndex(index)
         return index
     }
@@ -173,7 +184,7 @@ public final class LauncherManager: @unchecked Sendable {
         return index
     }
 
-    public static func identifyLauncher(at appURL: URL) throws -> LauncherRecord? {
+    public static func identifyManagedLauncher(at appURL: URL) throws -> LauncherRecord? {
         let infoURL = appURL.appendingPathComponent("Contents/Info.plist")
         guard let info = NSDictionary(contentsOf: infoURL) as? [String: Any] else {
             return nil
@@ -183,36 +194,17 @@ public final class LauncherManager: @unchecked Sendable {
             ?? (info["CFBundleName"] as? String)
             ?? appURL.deletingPathExtension().lastPathComponent
 
-        if let targetPath = info["CNPacTargetAppPath"] as? String {
-            let profile = (info["CNPacLauncherProfile"] as? String).flatMap(LauncherProfile.init(rawValue:))
-            return LauncherRecord(
-                displayName: name,
-                targetAppPath: targetPath,
-                launcherAppPath: appURL.path,
-                bundleIdentifier: info["CFBundleIdentifier"] as? String,
-                launcherProfile: profile,
-                managedByTool: true
-            )
-        }
-
-        let executable = (info["CFBundleExecutable"] as? String) ?? "launcher"
-        let scriptURL = appURL.appendingPathComponent("Contents/MacOS/\(executable)")
-        guard let script = try? String(contentsOf: scriptURL), script.contains("HTTP_PROXY") else {
+        guard let targetPath = info["CNPacTargetAppPath"] as? String else {
             return nil
         }
-
-        let targetPath = inferredTargetAppPath(fromLauncherScript: script) ?? ""
-        guard !targetPath.isEmpty || name.localizedCaseInsensitiveContains("proxy") else {
-            return nil
-        }
-
+        let profile = (info["CNPacLauncherProfile"] as? String).flatMap(LauncherProfile.init(rawValue:))
         return LauncherRecord(
             displayName: name,
             targetAppPath: targetPath,
             launcherAppPath: appURL.path,
             bundleIdentifier: info["CFBundleIdentifier"] as? String,
-            launcherProfile: inferredProfile(fromLauncherScript: script),
-            managedByTool: false
+            launcherProfile: profile,
+            managedByTool: true
         )
     }
 
@@ -236,33 +228,6 @@ public final class LauncherManager: @unchecked Sendable {
         }
 
         return .environment
-    }
-
-    public static func inferredTargetAppPath(fromLauncherScript script: String) -> String? {
-        let lines = script.split(whereSeparator: \.isNewline).map(String.init)
-        let execLine = lines.first { $0.trimmingCharacters(in: .whitespaces).hasPrefix("exec ") }
-        guard let execLine else {
-            return nil
-        }
-
-        let pattern = #"(\/.*?\.app)\/Contents\/MacOS\/[^\s"]+"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: execLine, range: NSRange(location: 0, length: (execLine as NSString).length)),
-              match.numberOfRanges > 1 else {
-            return nil
-        }
-        return (execLine as NSString).substring(with: match.range(at: 1))
-    }
-
-    public static func inferredProfile(fromLauncherScript script: String) -> LauncherProfile? {
-        let pattern = #"LAUNCHER_PROFILE='([^']+)'"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: script, range: NSRange(location: 0, length: (script as NSString).length)),
-              match.numberOfRanges > 1 else {
-            return nil
-        }
-        let rawValue = (script as NSString).substring(with: match.range(at: 1))
-        return LauncherProfile(rawValue: rawValue)
     }
 
     public static func executableURL(forApp appURL: URL) throws -> URL {
@@ -426,14 +391,6 @@ public final class LauncherManager: @unchecked Sendable {
         return "local.cn-pac-menubar.launcher.\(base).\(UUID().uuidString.prefix(8).lowercased())"
     }
 
-    private func defaultSearchDirectories() -> [URL] {
-        var directories: [URL] = []
-        if let userApplications = fileManager.urls(for: .applicationDirectory, in: .userDomainMask).first {
-            directories.append(userApplications)
-        }
-        directories.append(URL(fileURLWithPath: "/Applications", isDirectory: true))
-        return directories
-    }
 }
 
 public enum LauncherError: LocalizedError, Equatable {

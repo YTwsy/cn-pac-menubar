@@ -200,24 +200,46 @@ final class CNPacMenubarCoreTests: XCTestCase {
         XCTAssertTrue(script.contains("-DsocksProxyHost=${proxy_host}"))
     }
 
-    func testExistingLauncherTargetInference() {
-        let script = """
+    func testManagedLauncherIdentificationReadsOnlyPlistMetadata() throws {
+        let launcher = try makeTestApp(
+            name: "Codex Proxy.app",
+            info: [
+                "CFBundleDisplayName": "Codex Proxy",
+                "CFBundleExecutable": "launcher",
+                "CFBundleIdentifier": "local.cn-pac-menubar.launcher.codex",
+                "CNPacTargetAppPath": "/Applications/Codex.app",
+                "CNPacLauncherProfile": "chromium"
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: launcher.deletingLastPathComponent()) }
+
+        let record = try XCTUnwrap(try LauncherManager.identifyManagedLauncher(at: launcher))
+        XCTAssertEqual(record.displayName, "Codex Proxy")
+        XCTAssertEqual(record.targetAppPath, "/Applications/Codex.app")
+        XCTAssertEqual(record.launcherAppPath, launcher.path)
+        XCTAssertEqual(record.bundleIdentifier, "local.cn-pac-menubar.launcher.codex")
+        XCTAssertEqual(record.launcherProfile, .chromium)
+        XCTAssertTrue(record.managedByTool)
+    }
+
+    func testLegacyScriptWrapperIsNotAutoIdentified() throws {
+        let launcher = try makeTestApp(
+            name: "Legacy Proxy.app",
+            info: [
+                "CFBundleExecutable": "launcher",
+                "CFBundleIdentifier": "local.legacy.proxy"
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: launcher.deletingLastPathComponent()) }
+
+        let executableURL = launcher.appendingPathComponent("Contents/MacOS/launcher")
+        try """
         #!/bin/zsh
         export HTTP_PROXY=http://192.168.1.103:8080
         exec /Applications/Codex.app/Contents/MacOS/Codex "$@"
-        """
-        XCTAssertEqual(LauncherManager.inferredTargetAppPath(fromLauncherScript: script), "/Applications/Codex.app")
-    }
+        """.write(to: executableURL, atomically: true, encoding: .utf8)
 
-    func testLauncherProfileInferenceFromGeneratedScript() {
-        let script = LauncherScriptBuilder.script(input: LauncherBuildInput(
-            targetAppPath: "/Applications/Codex.app",
-            targetExecutablePath: "/Applications/Codex.app/Contents/MacOS/Codex",
-            settingsPath: "/Users/wsy/Library/Application Support/cn-pac-menubar/settings.json",
-            profile: .chromium
-        ))
-
-        XCTAssertEqual(LauncherManager.inferredProfile(fromLauncherScript: script), .chromium)
+        XCTAssertNil(try LauncherManager.identifyManagedLauncher(at: launcher))
     }
 
     func testSuggestedProfileDetectsElectronAndSafari() throws {
@@ -290,6 +312,102 @@ final class CNPacMenubarCoreTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: launcherIconURL.path))
         XCTAssertEqual(try Data(contentsOf: launcherIconURL), try Data(contentsOf: iconURL))
         XCTAssertEqual(launcherInfo["CFBundleIconFile"] as? String, "IconicIcon.icns")
+    }
+
+    func testRefreshManagedLaunchersDoesNotDiscoverUnindexedApps() throws {
+        let launcher = try makeTestApp(
+            name: "Unindexed Proxy.app",
+            info: [
+                "CFBundleDisplayName": "Unindexed Proxy",
+                "CFBundleExecutable": "launcher",
+                "CFBundleIdentifier": "local.cn-pac-menubar.launcher.unindexed",
+                "CNPacTargetAppPath": "/Applications/Unindexed.app",
+                "CNPacLauncherProfile": "environment"
+            ]
+        )
+        let root = launcher.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SettingsStore(appSupportDirectory: root.appendingPathComponent("Support", isDirectory: true))
+        let manager = LauncherManager(store: store)
+
+        XCTAssertTrue(try manager.refreshManagedLaunchers().launchers.isEmpty)
+    }
+
+    func testRefreshManagedLaunchersRemovesMissingAndUpdatesManagedMetadata() throws {
+        let launcher = try makeTestApp(
+            name: "Fresh Proxy.app",
+            info: [
+                "CFBundleDisplayName": "Fresh Proxy",
+                "CFBundleExecutable": "launcher",
+                "CFBundleIdentifier": "local.cn-pac-menubar.launcher.fresh",
+                "CNPacTargetAppPath": "/Applications/Fresh.app",
+                "CNPacLauncherProfile": "java"
+            ]
+        )
+        let root = launcher.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SettingsStore(appSupportDirectory: root.appendingPathComponent("Support", isDirectory: true))
+        let manager = LauncherManager(store: store)
+        let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let lastLaunchedAt = Date(timeIntervalSince1970: 1_700_000_500)
+        let staleRecord = LauncherRecord(
+            displayName: "Stale Proxy",
+            targetAppPath: "/Applications/Stale.app",
+            launcherAppPath: launcher.path,
+            bundleIdentifier: nil,
+            createdAt: createdAt,
+            lastLaunchedAt: lastLaunchedAt,
+            managedByTool: true
+        )
+        let missingRecord = LauncherRecord(
+            displayName: "Missing Proxy",
+            targetAppPath: "/Applications/Missing.app",
+            launcherAppPath: root.appendingPathComponent("Missing Proxy.app", isDirectory: true).path,
+            bundleIdentifier: nil,
+            managedByTool: true
+        )
+        try store.saveLauncherIndex(LauncherIndex(launchers: [missingRecord, staleRecord]))
+
+        let refreshed = try manager.refreshManagedLaunchers()
+        let record = try XCTUnwrap(refreshed.launchers.first)
+
+        XCTAssertEqual(refreshed.launchers.count, 1)
+        XCTAssertEqual(record.id, staleRecord.id)
+        XCTAssertEqual(record.displayName, "Fresh Proxy")
+        XCTAssertEqual(record.targetAppPath, "/Applications/Fresh.app")
+        XCTAssertEqual(record.launcherAppPath, launcher.path)
+        XCTAssertEqual(record.bundleIdentifier, "local.cn-pac-menubar.launcher.fresh")
+        XCTAssertEqual(record.launcherProfile, .java)
+        XCTAssertEqual(record.createdAt, createdAt)
+        XCTAssertEqual(record.lastLaunchedAt, lastLaunchedAt)
+        XCTAssertTrue(record.managedByTool)
+    }
+
+    func testRefreshManagedLaunchersKeepsIndexedLegacyRecordsWithoutMetadata() throws {
+        let launcher = try makeTestApp(
+            name: "Legacy Proxy.app",
+            info: [
+                "CFBundleExecutable": "launcher",
+                "CFBundleIdentifier": "local.legacy.proxy"
+            ]
+        )
+        let root = launcher.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try SettingsStore(appSupportDirectory: root.appendingPathComponent("Support", isDirectory: true))
+        let manager = LauncherManager(store: store)
+        let record = LauncherRecord(
+            displayName: "Legacy Proxy",
+            targetAppPath: "/Applications/Codex.app",
+            launcherAppPath: launcher.path,
+            bundleIdentifier: "local.legacy.proxy",
+            managedByTool: false
+        )
+        try store.saveLauncherIndex(LauncherIndex(launchers: [record]))
+
+        XCTAssertEqual(try manager.refreshManagedLaunchers().launchers, [record])
     }
 
     private func makeTestApp(name: String, info: [String: Any]) throws -> URL {
