@@ -32,6 +32,16 @@ Settings are stored in:
 
 Generated proxy launchers read `settings.json` every time they start, so updating the HTTP proxy host or port in CN PAC Menubar changes future launcher sessions without rebuilding the launcher.
 
+## Google VPN Keepalive
+
+The menu includes **Google VPN Keepalive** for sending a lightweight scheduled request while the app is running. Enable it from the menu or main window, then use **Keepalive Settings...** to adjust:
+
+- Target URL, defaulting to `https://www.gstatic.com/generate_204`.
+- Interval in seconds, from 30 seconds to 24 hours.
+- Timeout in seconds, from 1 to 120 seconds.
+
+The menu and main window show the latest result and the next scheduled request.
+
 ## LAN Devices
 
 The app keeps the Mac's own automatic proxy URL on loopback, for example `http://127.0.0.1:8118/proxy.pac`, and also exposes a LAN PAC URL in the menu bar such as `http://192.168.1.103:8118/proxy.pac`. Use **Copy LAN PAC URL** for phones, tablets, or other computers on the same network.

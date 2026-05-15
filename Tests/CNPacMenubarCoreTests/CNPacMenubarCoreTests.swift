@@ -1,4 +1,5 @@
 import XCTest
+import Network
 @testable import CNPacMenubarCore
 
 final class CNPacMenubarCoreTests: XCTestCase {
@@ -36,6 +37,79 @@ final class CNPacMenubarCoreTests: XCTestCase {
         XCTAssertEqual(settings.proxyStatusBarSummary, "192.168.1.103 S5:1080")
     }
 
+    func testSettingsDecodeBackfillsVPNKeepaliveDefaults() throws {
+        let data = """
+        {
+          "pacServerPort": 8123,
+          "proxyHost": "192.168.1.103",
+          "socks5Port": 1080,
+          "httpPort": 8080,
+          "proxyMode": "socks5AndHTTP",
+          "noProxy": "127.0.0.1,localhost,::1",
+          "launchAtLogin": true,
+          "refreshVersion": 7
+        }
+        """.data(using: .utf8)!
+
+        let settings = try JSONDecoder().decode(CNPacSettings.self, from: data)
+
+        XCTAssertEqual(settings.pacServerPort, 8123)
+        XCTAssertTrue(settings.launchAtLogin)
+        XCTAssertFalse(settings.vpnKeepaliveEnabled)
+        XCTAssertEqual(settings.vpnKeepaliveURL, CNPacSettings.defaultVPNKeepaliveURL)
+        XCTAssertEqual(settings.vpnKeepaliveIntervalSeconds, 300)
+        XCTAssertEqual(settings.vpnKeepaliveTimeoutSeconds, 10)
+    }
+
+    func testVPNKeepaliveConfigurationValidatesURLAndTiming() {
+        var settings = CNPacSettings(
+            vpnKeepaliveEnabled: true,
+            vpnKeepaliveURL: " https://example.com/ping ",
+            vpnKeepaliveIntervalSeconds: 5,
+            vpnKeepaliveTimeoutSeconds: 999
+        )
+
+        let configuration = VPNKeepaliveConfiguration(settings: settings)
+        XCTAssertEqual(configuration?.url.absoluteString, "https://example.com/ping")
+        XCTAssertEqual(configuration?.intervalSeconds, VPNKeepaliveConfiguration.minimumIntervalSeconds)
+        XCTAssertEqual(configuration?.timeoutSeconds, VPNKeepaliveConfiguration.maximumTimeoutSeconds)
+
+        settings.vpnKeepaliveURL = "ftp://example.com/ping"
+        XCTAssertNil(VPNKeepaliveConfiguration(settings: settings))
+
+        settings.vpnKeepaliveEnabled = false
+        settings.vpnKeepaliveURL = CNPacSettings.defaultVPNKeepaliveURL
+        XCTAssertNil(VPNKeepaliveConfiguration(settings: settings))
+    }
+
+    func testVPNKeepaliveStatusDetailShowsClockTimesWithoutStaleCountdown() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 5,
+            day: 15,
+            hour: 23,
+            minute: 3,
+            second: 9
+        )))
+        let nextRun = try XCTUnwrap(calendar.date(byAdding: .minute, value: 5, to: now))
+        let status = VPNKeepaliveStatus(
+            isEnabled: true,
+            isRunning: false,
+            nextRun: nextRun,
+            lastResult: .success(completedAt: now, statusCode: 204, durationMilliseconds: 2351)
+        )
+        let running = VPNKeepaliveStatus(
+            isEnabled: true,
+            isRunning: true,
+            lastStartedAt: now
+        )
+
+        XCTAssertEqual(status.detail, "HTTP 204 at 23:03:09 (2351 ms); next at 23:08:09")
+        XCTAssertEqual(running.detail, "Request in progress since 23:03:09")
+    }
+
     func testPACServerStateDetails() {
         XCTAssertFalse(PACServerState.stopped.isActive)
         XCTAssertEqual(PACServerState.stopped.detail, "Stopped")
@@ -44,6 +118,13 @@ final class CNPacMenubarCoreTests: XCTestCase {
         XCTAssertTrue(PACServerState.running(port: 8118).isRunning)
         XCTAssertEqual(PACServerState.running(port: 8118).detail, "Running on all interfaces:8118")
         XCTAssertEqual(PACServerState.failed(port: 8118, message: "address in use").displayName, "Failed")
+    }
+
+    func testPACServerListenerParametersAllowLANAccess() {
+        let parameters = PACServer.listenerParameters()
+
+        XCTAssertNil(parameters.requiredLocalEndpoint)
+        XCTAssertFalse(parameters.acceptLocalOnly)
     }
 
     func testPACRewriterReplacesGeneratedProxyReturns() {
@@ -178,6 +259,39 @@ final class CNPacMenubarCoreTests: XCTestCase {
         XCTAssertEqual(try LauncherManager.suggestedProfile(forApp: javaApp), .java)
     }
 
+    func testCreateLauncherCopiesTargetAppIcon() throws {
+        let app = try makeTestApp(
+            name: "Iconic.app",
+            info: [
+                "CFBundleExecutable": "Iconic",
+                "CFBundleIdentifier": "com.example.Iconic",
+                "CFBundleIconFile": "IconicIcon"
+            ]
+        )
+        let root = app.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let resourcesURL = app.appendingPathComponent("Contents/Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resourcesURL, withIntermediateDirectories: true)
+        let iconURL = resourcesURL.appendingPathComponent("IconicIcon.icns")
+        try Data([0, 1, 2, 3]).write(to: iconURL)
+
+        let store = try SettingsStore(appSupportDirectory: root.appendingPathComponent("Support", isDirectory: true))
+        let manager = LauncherManager(store: store)
+        let record = try manager.createLauncher(
+            targetAppURL: app,
+            destinationDirectory: root.appendingPathComponent("Launchers", isDirectory: true)
+        )
+        let launcherURL = URL(fileURLWithPath: record.launcherAppPath)
+        let launcherIconURL = launcherURL.appendingPathComponent("Contents/Resources/IconicIcon.icns")
+        let launcherInfoURL = launcherURL.appendingPathComponent("Contents/Info.plist")
+        let launcherInfo = try XCTUnwrap(NSDictionary(contentsOf: launcherInfoURL) as? [String: Any])
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: launcherIconURL.path))
+        XCTAssertEqual(try Data(contentsOf: launcherIconURL), try Data(contentsOf: iconURL))
+        XCTAssertEqual(launcherInfo["CFBundleIconFile"] as? String, "IconicIcon.icns")
+    }
+
     private func makeTestApp(name: String, info: [String: Any]) throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let appURL = root.appendingPathComponent(name, isDirectory: true)
@@ -186,6 +300,11 @@ final class CNPacMenubarCoreTests: XCTestCase {
         try FileManager.default.createDirectory(at: macOSURL, withIntermediateDirectories: true)
         let data = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
         try data.write(to: contentsURL.appendingPathComponent("Info.plist"))
+        if let executableName = info["CFBundleExecutable"] as? String {
+            let executableURL = macOSURL.appendingPathComponent(executableName)
+            try "#!/bin/zsh\n".write(to: executableURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path)
+        }
         return appURL
     }
 }

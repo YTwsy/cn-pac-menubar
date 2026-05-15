@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var pacServer: PACServer!
     private let proxyManager = SystemProxyManager()
     private var launcherManager: LauncherManager!
+    private var keepaliveService: VPNKeepaliveService!
     private var lastPACWarnings: [String] = []
     private weak var proxyModePopup: NSPopUpButton?
     private weak var proxyHostField: NSTextField?
@@ -40,6 +41,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self?.refreshUI()
             }
         }
+        keepaliveService = VPNKeepaliveService()
+        keepaliveService.onStatusChange = { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.refreshUI()
+            }
+        }
+        keepaliveService.apply(settings: settings)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
@@ -55,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         pacServer?.stop()
+        keepaliveService?.stop()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -64,11 +73,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return true
     }
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard sender === mainWindow else { return true }
+        sender.orderOut(nil)
+        hideDockIcon()
+        return false
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard notification.object as? NSWindow === mainWindow else { return }
         DispatchQueue.main.async {
             if NSApp.windows.allSatisfy({ !$0.isVisible }) {
-                NSApp.setActivationPolicy(.accessory)
+                self.hideDockIcon()
             }
         }
     }
@@ -83,12 +99,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func updateStatusItem() {
         guard let button = statusItem?.button else { return }
-        button.title = "PAC \(settings.proxyStatusBarSummary)"
-        button.toolTip = [
-            "CN PAC Menubar",
-            "Proxy: \(settings.proxyEndpointSummary)",
-            "Server: \(pacServer?.state.detail ?? PACServerState.stopped.detail)"
-        ].joined(separator: "\n")
+        button.title = "PAC"
+        button.toolTip = "CN PAC Menubar"
     }
 
     private func rebuildMenu() {
@@ -101,6 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         addDisabled("Local PAC URL: \(settings.pacURL.absoluteString)", to: menu)
         addDisabled("LAN PAC URL: \(lanURL?.absoluteString ?? "No LAN IPv4 found")", to: menu)
         addDisabled("Proxy: \(settings.proxyEndpointSummary)", to: menu)
+        addDisabled("VPN Keepalive: \(keepaliveService.status.detail)", to: menu)
         if !lastPACWarnings.isEmpty {
             addDisabled("PAC warning: \(lastPACWarnings.joined(separator: " "))", to: menu)
         }
@@ -125,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(.separator())
 
         menu.addItem(proxyRuleItem())
+        menu.addItem(vpnKeepaliveItem())
         menu.addItem(launchersItem())
         menu.addItem(.separator())
 
@@ -177,6 +191,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return item
     }
 
+    private func vpnKeepaliveItem() -> NSMenuItem {
+        let status = keepaliveService.status
+        let item = NSMenuItem(title: "Google VPN Keepalive: \(status.displayName)", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        addDisabled("Status: \(status.detail)", to: submenu)
+        addDisabled("Target: \(settings.vpnKeepaliveURL)", to: submenu)
+        addDisabled("Interval: \(settings.vpnKeepaliveIntervalSeconds)s · Timeout: \(settings.vpnKeepaliveTimeoutSeconds)s", to: submenu)
+        submenu.addItem(.separator())
+
+        let toggle = actionItem(settings.vpnKeepaliveEnabled ? "Disable Keepalive" : "Enable Keepalive", #selector(toggleVPNKeepalive))
+        toggle.state = settings.vpnKeepaliveEnabled ? .on : .off
+        submenu.addItem(toggle)
+        submenu.addItem(actionItem("Check Now", #selector(runVPNKeepaliveNow), enabled: settings.vpnKeepaliveEnabled))
+        submenu.addItem(actionItem("Keepalive Settings...", #selector(configureVPNKeepalive)))
+
+        item.submenu = submenu
+        return item
+    }
+
     private func launchersItem() -> NSMenuItem {
         let item = NSMenuItem(title: "Launchers", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
@@ -220,6 +253,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func choosePAC() {
+        frontMainWindow()
+
         let panel = NSOpenPanel()
         panel.title = "Choose PAC File"
         panel.canChooseFiles = true
@@ -421,7 +456,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         commitProxySettings()
     }
 
+    @objc private func toggleVPNKeepalive() {
+        settings.vpnKeepaliveEnabled.toggle()
+        commitVPNKeepaliveSettings()
+    }
+
+    @objc private func runVPNKeepaliveNow() {
+        keepaliveService.runNow()
+        refreshUI()
+    }
+
+    @objc private func configureVPNKeepalive() {
+        guard let result = vpnKeepaliveDialog() else { return }
+        settings.vpnKeepaliveEnabled = result.enabled
+        settings.vpnKeepaliveURL = result.url
+        settings.vpnKeepaliveIntervalSeconds = result.intervalSeconds
+        settings.vpnKeepaliveTimeoutSeconds = result.timeoutSeconds
+        commitVPNKeepaliveSettings()
+    }
+
     @objc private func createLauncher() {
+        frontMainWindow()
+
         let targetPanel = NSOpenPanel()
         targetPanel.title = "Choose Target App"
         targetPanel.canChooseFiles = true
@@ -531,32 +587,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func showMainWindow() {
-        NSApp.setActivationPolicy(.regular)
+        frontMainWindow()
+    }
+
+    @discardableResult
+    private func frontMainWindow() -> NSWindow {
+        showDockIcon()
         if let mainWindow {
             updateMainWindow(mainWindow)
             if mainWindow.isMiniaturized {
                 mainWindow.deminiaturize(nil)
             }
-            mainWindow.makeKeyAndOrderFront(nil)
+            NSApp.unhide(nil)
             NSApp.activate(ignoringOtherApps: true)
-            return
+            mainWindow.makeKeyAndOrderFront(nil)
+            mainWindow.orderFrontRegardless()
+            return mainWindow
         }
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "CN PAC Menubar"
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 560, height: 380)
+        window.minSize = NSSize(width: 580, height: 500)
         window.delegate = self
         window.center()
         mainWindow = window
         updateMainWindow(window)
-        window.makeKeyAndOrderFront(nil)
+        NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        return window
+    }
+
+    private func showDockIcon() {
+        NSApp.setActivationPolicy(.regular)
+    }
+
+    private func hideDockIcon() {
+        NSApp.setActivationPolicy(.accessory)
     }
 
     private func updateMainWindow(_ window: NSWindow) {
@@ -621,6 +695,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         stack.addArrangedSubview(separator())
         stack.addArrangedSubview(sectionTitle("Proxy"))
         stack.addArrangedSubview(proxyQuickEditor())
+
+        stack.addArrangedSubview(separator())
+        stack.addArrangedSubview(sectionTitle("Google VPN Keepalive"))
+        stack.addArrangedSubview(infoRow("Status", keepaliveService.status.detail))
+        stack.addArrangedSubview(infoRow("Target", settings.vpnKeepaliveURL))
+        let keepaliveButtons = NSStackView()
+        keepaliveButtons.orientation = .horizontal
+        keepaliveButtons.spacing = 8
+        keepaliveButtons.addArrangedSubview(button(settings.vpnKeepaliveEnabled ? "Disable Keepalive" : "Enable Keepalive", action: #selector(toggleVPNKeepalive)))
+        let checkNow = button("Check Now", action: #selector(runVPNKeepaliveNow))
+        checkNow.isEnabled = settings.vpnKeepaliveEnabled
+        keepaliveButtons.addArrangedSubview(checkNow)
+        keepaliveButtons.addArrangedSubview(button("Keepalive Settings...", action: #selector(configureVPNKeepalive)))
+        stack.addArrangedSubview(keepaliveButtons)
 
         let secondaryButtons = NSStackView()
         secondaryButtons.orientation = .horizontal
@@ -763,6 +851,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         refreshUI()
     }
 
+    private func commitVPNKeepaliveSettings() {
+        do {
+            try store.saveSettings(settings)
+            keepaliveService.apply(settings: settings)
+        } catch {
+            showError(error)
+        }
+        refreshUI()
+    }
+
     private func saveOrRefreshPAC(applySystemProxy: Bool) throws {
         guard settings.pacPath != nil else {
             try store.saveSettings(settings)
@@ -860,6 +958,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         settingsFormDialog(title: "Settings", includePACServerPort: true)
     }
 
+    private func vpnKeepaliveDialog() -> VPNKeepaliveFormResult? {
+        let alert = NSAlert()
+        alert.messageText = "Google VPN Keepalive"
+        alert.informativeText = "Send a lightweight request on a schedule so the phone-side VPN continues seeing traffic."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+
+        let enabled = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+        enabled.state = settings.vpnKeepaliveEnabled ? .on : .off
+        let url = NSTextField(string: settings.vpnKeepaliveURL)
+        let interval = NSTextField(string: "\(settings.vpnKeepaliveIntervalSeconds)")
+        let timeout = NSTextField(string: "\(settings.vpnKeepaliveTimeoutSeconds)")
+
+        let grid = NSGridView()
+        grid.rowSpacing = 8
+        grid.columnSpacing = 10
+        grid.addRow(with: [label("Enabled"), enabled])
+        grid.addRow(with: [label("Target URL"), url])
+        grid.addRow(with: [label("Interval Seconds"), interval])
+        grid.addRow(with: [label("Timeout Seconds"), timeout])
+        grid.frame = NSRect(x: 0, y: 0, width: 460, height: 128)
+        url.frame.size.width = 320
+        interval.frame.size.width = 320
+        timeout.frame.size.width = 320
+        alert.accessoryView = grid
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+
+        let targetURL = url.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard VPNKeepaliveConfiguration.normalizedURL(from: targetURL) != nil else {
+            showInfo("Invalid keepalive URL", "Use an HTTP or HTTPS URL, for example \(CNPacSettings.defaultVPNKeepaliveURL).")
+            return nil
+        }
+        guard let intervalSeconds = Int(interval.stringValue),
+              (VPNKeepaliveConfiguration.minimumIntervalSeconds...VPNKeepaliveConfiguration.maximumIntervalSeconds).contains(intervalSeconds),
+              let timeoutSeconds = Int(timeout.stringValue),
+              (VPNKeepaliveConfiguration.minimumTimeoutSeconds...VPNKeepaliveConfiguration.maximumTimeoutSeconds).contains(timeoutSeconds) else {
+            showInfo(
+                "Invalid keepalive timing",
+                "Use an interval from \(VPNKeepaliveConfiguration.minimumIntervalSeconds) to \(VPNKeepaliveConfiguration.maximumIntervalSeconds) seconds and a timeout from \(VPNKeepaliveConfiguration.minimumTimeoutSeconds) to \(VPNKeepaliveConfiguration.maximumTimeoutSeconds) seconds."
+            )
+            return nil
+        }
+
+        return VPNKeepaliveFormResult(
+            enabled: enabled.state == .on,
+            url: targetURL,
+            intervalSeconds: intervalSeconds,
+            timeoutSeconds: timeoutSeconds
+        )
+    }
+
     private func settingsFormDialog(title: String, includePACServerPort: Bool) -> SettingsFormResult? {
         let alert = NSAlert()
         alert.messageText = title
@@ -936,6 +1087,13 @@ private struct SettingsFormResult {
     var socks5Port: Int
     var noProxy: String
     var pacServerPort: Int
+}
+
+private struct VPNKeepaliveFormResult {
+    var enabled: Bool
+    var url: String
+    var intervalSeconds: Int
+    var timeoutSeconds: Int
 }
 
 private enum AppError: LocalizedError {

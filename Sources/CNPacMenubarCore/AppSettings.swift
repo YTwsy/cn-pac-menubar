@@ -51,6 +51,8 @@ public enum LauncherProfile: String, Codable, CaseIterable, Sendable {
 }
 
 public struct CNPacSettings: Codable, Equatable, Sendable {
+    public static let defaultVPNKeepaliveURL = "https://www.gstatic.com/generate_204"
+
     public var pacPath: String?
     public var recentPACPaths: [String]
     public var pacServerPort: Int
@@ -60,6 +62,10 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
     public var proxyMode: ProxyMode
     public var noProxy: String
     public var launchAtLogin: Bool
+    public var vpnKeepaliveEnabled: Bool
+    public var vpnKeepaliveURL: String
+    public var vpnKeepaliveIntervalSeconds: Int
+    public var vpnKeepaliveTimeoutSeconds: Int
     public var refreshVersion: Int
 
     public init(
@@ -72,6 +78,10 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         proxyMode: ProxyMode = .socks5AndHTTP,
         noProxy: String = "127.0.0.1,localhost,::1",
         launchAtLogin: Bool = false,
+        vpnKeepaliveEnabled: Bool = false,
+        vpnKeepaliveURL: String = CNPacSettings.defaultVPNKeepaliveURL,
+        vpnKeepaliveIntervalSeconds: Int = 300,
+        vpnKeepaliveTimeoutSeconds: Int = 10,
         refreshVersion: Int = 1
     ) {
         self.pacPath = pacPath
@@ -83,7 +93,67 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         self.proxyMode = proxyMode
         self.noProxy = noProxy
         self.launchAtLogin = launchAtLogin
+        self.vpnKeepaliveEnabled = vpnKeepaliveEnabled
+        self.vpnKeepaliveURL = vpnKeepaliveURL
+        self.vpnKeepaliveIntervalSeconds = vpnKeepaliveIntervalSeconds
+        self.vpnKeepaliveTimeoutSeconds = vpnKeepaliveTimeoutSeconds
         self.refreshVersion = refreshVersion
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pacPath
+        case recentPACPaths
+        case pacServerPort
+        case proxyHost
+        case socks5Port
+        case httpPort
+        case proxyMode
+        case noProxy
+        case launchAtLogin
+        case vpnKeepaliveEnabled
+        case vpnKeepaliveURL
+        case vpnKeepaliveIntervalSeconds
+        case vpnKeepaliveTimeoutSeconds
+        case refreshVersion
+    }
+
+    public init(from decoder: Decoder) throws {
+        let defaults = CNPacSettings()
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            pacPath: try container.decodeIfPresent(String.self, forKey: .pacPath),
+            recentPACPaths: try container.decodeIfPresent([String].self, forKey: .recentPACPaths) ?? defaults.recentPACPaths,
+            pacServerPort: try container.decodeIfPresent(Int.self, forKey: .pacServerPort) ?? defaults.pacServerPort,
+            proxyHost: try container.decodeIfPresent(String.self, forKey: .proxyHost) ?? defaults.proxyHost,
+            socks5Port: try container.decodeIfPresent(Int.self, forKey: .socks5Port) ?? defaults.socks5Port,
+            httpPort: try container.decodeIfPresent(Int.self, forKey: .httpPort) ?? defaults.httpPort,
+            proxyMode: try container.decodeIfPresent(ProxyMode.self, forKey: .proxyMode) ?? defaults.proxyMode,
+            noProxy: try container.decodeIfPresent(String.self, forKey: .noProxy) ?? defaults.noProxy,
+            launchAtLogin: try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? defaults.launchAtLogin,
+            vpnKeepaliveEnabled: try container.decodeIfPresent(Bool.self, forKey: .vpnKeepaliveEnabled) ?? defaults.vpnKeepaliveEnabled,
+            vpnKeepaliveURL: try container.decodeIfPresent(String.self, forKey: .vpnKeepaliveURL) ?? defaults.vpnKeepaliveURL,
+            vpnKeepaliveIntervalSeconds: try container.decodeIfPresent(Int.self, forKey: .vpnKeepaliveIntervalSeconds) ?? defaults.vpnKeepaliveIntervalSeconds,
+            vpnKeepaliveTimeoutSeconds: try container.decodeIfPresent(Int.self, forKey: .vpnKeepaliveTimeoutSeconds) ?? defaults.vpnKeepaliveTimeoutSeconds,
+            refreshVersion: try container.decodeIfPresent(Int.self, forKey: .refreshVersion) ?? defaults.refreshVersion
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(pacPath, forKey: .pacPath)
+        try container.encode(recentPACPaths, forKey: .recentPACPaths)
+        try container.encode(pacServerPort, forKey: .pacServerPort)
+        try container.encode(proxyHost, forKey: .proxyHost)
+        try container.encode(socks5Port, forKey: .socks5Port)
+        try container.encode(httpPort, forKey: .httpPort)
+        try container.encode(proxyMode, forKey: .proxyMode)
+        try container.encode(noProxy, forKey: .noProxy)
+        try container.encode(launchAtLogin, forKey: .launchAtLogin)
+        try container.encode(vpnKeepaliveEnabled, forKey: .vpnKeepaliveEnabled)
+        try container.encode(vpnKeepaliveURL, forKey: .vpnKeepaliveURL)
+        try container.encode(vpnKeepaliveIntervalSeconds, forKey: .vpnKeepaliveIntervalSeconds)
+        try container.encode(vpnKeepaliveTimeoutSeconds, forKey: .vpnKeepaliveTimeoutSeconds)
+        try container.encode(refreshVersion, forKey: .refreshVersion)
     }
 
     public var pacURL: URL {

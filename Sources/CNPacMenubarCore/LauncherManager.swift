@@ -111,9 +111,11 @@ public final class LauncherManager: @unchecked Sendable {
         let launcherURL = destinationDirectory.appendingPathComponent(launcherName, isDirectory: true)
         let contentsURL = launcherURL.appendingPathComponent("Contents", isDirectory: true)
         let macOSURL = contentsURL.appendingPathComponent("MacOS", isDirectory: true)
+        let resourcesURL = contentsURL.appendingPathComponent("Resources", isDirectory: true)
         let launcherExecutableURL = macOSURL.appendingPathComponent("launcher")
 
         try fileManager.createDirectory(at: macOSURL, withIntermediateDirectories: true)
+        let iconFileName = try copyIconResource(fromApp: targetAppURL, to: resourcesURL)
 
         let script = LauncherScriptBuilder.script(input: LauncherBuildInput(
             targetAppPath: targetAppURL.path,
@@ -130,7 +132,8 @@ public final class LauncherManager: @unchecked Sendable {
             launcherExecutable: "launcher",
             bundleIdentifier: Self.launcherBundleIdentifier(targetBundleIdentifier: bundleIdentifier, launcherURL: launcherURL),
             targetAppPath: targetAppURL.path,
-            profile: profile
+            profile: profile,
+            iconFileName: iconFileName
         )
         let infoData = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
         try infoData.write(to: contentsURL.appendingPathComponent("Info.plist"), options: [.atomic])
@@ -327,8 +330,76 @@ public final class LauncherManager: @unchecked Sendable {
         return markerPaths.contains { FileManager.default.fileExists(atPath: appURL.appendingPathComponent($0).path) }
     }
 
-    private func makeInfoPlist(displayName: String, launcherExecutable: String, bundleIdentifier: String, targetAppPath: String, profile: LauncherProfile) -> [String: Any] {
-        [
+    private func copyIconResource(fromApp appURL: URL, to resourcesURL: URL) throws -> String? {
+        guard let iconURL = Self.iconResourceURL(forApp: appURL, fileManager: fileManager) else {
+            return nil
+        }
+
+        try fileManager.createDirectory(at: resourcesURL, withIntermediateDirectories: true)
+        let destinationURL = resourcesURL.appendingPathComponent(iconURL.lastPathComponent)
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+        try fileManager.copyItem(at: iconURL, to: destinationURL)
+        return destinationURL.lastPathComponent
+    }
+
+    private static func iconResourceURL(forApp appURL: URL, fileManager: FileManager) -> URL? {
+        let infoURL = appURL.appendingPathComponent("Contents/Info.plist")
+        guard let info = NSDictionary(contentsOf: infoURL) as? [String: Any] else {
+            return nil
+        }
+
+        let resourcesURL = appURL.appendingPathComponent("Contents/Resources", isDirectory: true)
+        for iconName in iconResourceCandidates(from: info) {
+            for fileName in iconFileNameVariants(iconName) {
+                let iconURL = resourcesURL.appendingPathComponent(fileName)
+                if fileManager.fileExists(atPath: iconURL.path) {
+                    return iconURL
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func iconResourceCandidates(from info: [String: Any]) -> [String] {
+        var candidates: [String] = []
+        if let iconFile = info["CFBundleIconFile"] as? String {
+            candidates.append(iconFile)
+        }
+        if let iconName = info["CFBundleIconName"] as? String {
+            candidates.append(iconName)
+        }
+        if let icons = info["CFBundleIcons"] as? [String: Any],
+           let primaryIcon = icons["CFBundlePrimaryIcon"] as? [String: Any],
+           let iconFiles = primaryIcon["CFBundleIconFiles"] as? [String] {
+            candidates.append(contentsOf: iconFiles.reversed())
+        }
+
+        var seen = Set<String>()
+        return candidates.filter { candidate in
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !seen.contains(trimmed) else {
+                return false
+            }
+            seen.insert(trimmed)
+            return true
+        }
+    }
+
+    private static func iconFileNameVariants(_ iconName: String) -> [String] {
+        let fileName = URL(fileURLWithPath: iconName.trimmingCharacters(in: .whitespacesAndNewlines)).lastPathComponent
+        guard !fileName.isEmpty else {
+            return []
+        }
+        if (fileName as NSString).pathExtension.isEmpty {
+            return ["\(fileName).icns", fileName]
+        }
+        return [fileName]
+    }
+
+    private func makeInfoPlist(displayName: String, launcherExecutable: String, bundleIdentifier: String, targetAppPath: String, profile: LauncherProfile, iconFileName: String?) -> [String: Any] {
+        var info: [String: Any] = [
             "CFBundleName": displayName,
             "CFBundleDisplayName": displayName,
             "CFBundleIdentifier": bundleIdentifier,
@@ -341,6 +412,10 @@ public final class LauncherManager: @unchecked Sendable {
             "CNPacLauncherProfile": profile.rawValue,
             "CNPacSettingsPath": store.settingsURL.path
         ]
+        if let iconFileName {
+            info["CFBundleIconFile"] = iconFileName
+        }
+        return info
     }
 
     private static func launcherBundleIdentifier(targetBundleIdentifier: String?, launcherURL: URL) -> String {

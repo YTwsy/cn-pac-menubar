@@ -99,10 +99,7 @@ public final class PACServer: @unchecked Sendable {
         let previousListener = replaceListener(nil, nextState: .stopped)
         previousListener?.cancel()
 
-        let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.any), port: nwPort)
-        parameters.allowLocalEndpointReuse = true
-        parameters.acceptLocalOnly = true
+        let parameters = Self.listenerParameters()
         let listener = try NWListener(using: parameters, on: nwPort)
         listener.newConnectionHandler = { [weak self] connection in
             self?.handle(connection)
@@ -121,6 +118,13 @@ public final class PACServer: @unchecked Sendable {
     public func stop() {
         let previousListener = replaceListener(nil, nextState: .stopped)
         previousListener?.cancel()
+    }
+
+    static func listenerParameters() -> NWParameters {
+        let parameters = NWParameters.tcp
+        parameters.allowLocalEndpointReuse = true
+        parameters.acceptLocalOnly = false
+        return parameters
     }
 
     private func install(listener: NWListener, port: Int) -> UInt64 {

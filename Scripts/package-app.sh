@@ -26,6 +26,7 @@ else
     "$ROOT_DIR/Sources/CNPacMenubarCore/SystemProxyManager.swift"
     "$ROOT_DIR/Sources/CNPacMenubarCore/LauncherManager.swift"
     "$ROOT_DIR/Sources/CNPacMenubarCore/NetworkInterface.swift"
+    "$ROOT_DIR/Sources/CNPacMenubarCore/VPNKeepaliveService.swift"
   )
 
   swiftc \
