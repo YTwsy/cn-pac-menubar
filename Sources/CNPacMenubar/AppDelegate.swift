@@ -3,7 +3,7 @@ import CNPacMenubarCore
 import ServiceManagement
 import UniformTypeIdentifiers
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var mainWindow: NSWindow?
     private var store: SettingsStore!
@@ -18,6 +18,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private weak var proxyHostField: NSTextField?
     private weak var socks5PortField: NSTextField?
     private weak var httpPortField: NSTextField?
+    private var statusMenuOpenDepth = 0
+    private weak var menuVPNKeepaliveSummaryItem: NSMenuItem?
+    private weak var menuVPNKeepaliveParentItem: NSMenuItem?
+    private weak var menuVPNKeepaliveStatusItem: NSMenuItem?
+    private weak var menuVPNKeepaliveCheckButton: NSButton?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -91,10 +96,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func refreshUI() {
         updateStatusItem()
-        rebuildMenu()
+        if isStatusMenuOpen {
+            updateOpenMenuKeepaliveItems()
+        } else {
+            rebuildMenu()
+        }
         if let mainWindow, mainWindow.isVisible {
             updateMainWindow(mainWindow)
         }
+    }
+
+    private var isStatusMenuOpen: Bool {
+        statusMenuOpenDepth > 0
     }
 
     private func updateStatusItem() {
@@ -105,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func rebuildMenu() {
         let menu = NSMenu()
+        menu.delegate = self
         let lanURL = currentLANPACURL()
 
         addDisabled("CN PAC Menubar", to: menu)
@@ -113,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         addDisabled("Local PAC URL: \(settings.pacURL.absoluteString)", to: menu)
         addDisabled("LAN PAC URL: \(lanURL?.absoluteString ?? "No LAN IPv4 found")", to: menu)
         addDisabled("Proxy: \(settings.proxyEndpointSummary)", to: menu)
-        addDisabled("VPN Keepalive: \(keepaliveService.status.detail)", to: menu)
+        menuVPNKeepaliveSummaryItem = addDisabled("VPN Keepalive: \(keepaliveService.status.detail)", to: menu)
         if !lastPACWarnings.isEmpty {
             addDisabled("PAC warning: \(lastPACWarnings.joined(separator: " "))", to: menu)
         }
@@ -195,8 +209,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func vpnKeepaliveItem() -> NSMenuItem {
         let status = keepaliveService.status
         let item = NSMenuItem(title: "Google VPN Keepalive: \(status.displayName)", action: nil, keyEquivalent: "")
+        menuVPNKeepaliveParentItem = item
         let submenu = NSMenu()
-        addDisabled("Status: \(status.detail)", to: submenu)
+        menuVPNKeepaliveStatusItem = addDisabled("Status: \(status.detail)", to: submenu)
         addDisabled("Target: \(settings.vpnKeepaliveURL)", to: submenu)
         addDisabled("Interval: \(settings.vpnKeepaliveIntervalSeconds)s · Timeout: \(settings.vpnKeepaliveTimeoutSeconds)s", to: submenu)
         submenu.addItem(.separator())
@@ -204,10 +219,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let toggle = actionItem(settings.vpnKeepaliveEnabled ? "Disable Keepalive" : "Enable Keepalive", #selector(toggleVPNKeepalive))
         toggle.state = settings.vpnKeepaliveEnabled ? .on : .off
         submenu.addItem(toggle)
-        submenu.addItem(actionItem("Check Now", #selector(runVPNKeepaliveNow), enabled: settings.vpnKeepaliveEnabled))
+        submenu.addItem(keepaliveCheckNowItem(enabled: settings.vpnKeepaliveEnabled))
         submenu.addItem(actionItem("Keepalive Settings...", #selector(configureVPNKeepalive)))
 
         item.submenu = submenu
+        return item
+    }
+
+    private func keepaliveCheckNowItem(enabled: Bool) -> NSMenuItem {
+        let item = NSMenuItem()
+        let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 34))
+
+        let button = NSButton(title: "Check Now", target: self, action: #selector(runVPNKeepaliveNow))
+        button.bezelStyle = .rounded
+        button.isEnabled = enabled
+        button.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(button)
+
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 18),
+            button.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -10),
+            button.centerYAnchor.constraint(equalTo: row.centerYAnchor)
+        ])
+
+        menuVPNKeepaliveCheckButton = button
+        item.view = row
         return item
     }
 
@@ -834,17 +870,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return box
     }
 
-    private func statusBadge(_ text: String, color: NSColor) -> NSTextField {
+    private func statusBadge(_ text: String, color: NSColor) -> NSView {
+        let badge = NSView()
+        badge.wantsLayer = true
+        badge.layer?.cornerRadius = 6
+        badge.layer?.backgroundColor = color.withAlphaComponent(0.12).cgColor
+        badge.widthAnchor.constraint(greaterThanOrEqualToConstant: 86).isActive = true
+        badge.heightAnchor.constraint(equalToConstant: 26).isActive = true
+
         let label = NSTextField(labelWithString: text)
         label.font = .boldSystemFont(ofSize: 12)
         label.textColor = color
         label.alignment = .center
-        label.wantsLayer = true
-        label.layer?.cornerRadius = 6
-        label.layer?.backgroundColor = color.withAlphaComponent(0.12).cgColor
-        label.widthAnchor.constraint(greaterThanOrEqualToConstant: 86).isActive = true
-        label.heightAnchor.constraint(equalToConstant: 26).isActive = true
-        return label
+        label.translatesAutoresizingMaskIntoConstraints = false
+        badge.addSubview(label)
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: badge.leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: badge.trailingAnchor, constant: -12),
+            label.centerXAnchor.constraint(equalTo: badge.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: badge.centerYAnchor)
+        ])
+
+        return badge
     }
 
     private func statusColor(for state: PACServerState) -> NSColor {
@@ -930,10 +978,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         refreshUI()
     }
 
-    private func addDisabled(_ title: String, to menu: NSMenu) {
+    @discardableResult
+    private func addDisabled(_ title: String, to menu: NSMenu) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.isEnabled = false
         menu.addItem(item)
+        return item
+    }
+
+    private func updateOpenMenuKeepaliveItems() {
+        let status = keepaliveService.status
+        menuVPNKeepaliveSummaryItem?.title = "VPN Keepalive: \(status.detail)"
+        menuVPNKeepaliveParentItem?.title = "Google VPN Keepalive: \(status.displayName)"
+        menuVPNKeepaliveStatusItem?.title = "Status: \(status.detail)"
+        menuVPNKeepaliveCheckButton?.isEnabled = settings.vpnKeepaliveEnabled
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        statusMenuOpenDepth += 1
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        statusMenuOpenDepth = max(0, statusMenuOpenDepth - 1)
+        if !isStatusMenuOpen {
+            DispatchQueue.main.async { [weak self] in
+                self?.refreshUI()
+            }
+        }
     }
 
     private func copyToPasteboard(_ value: String) {
