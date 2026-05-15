@@ -129,6 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(actionItem("Set PAC Server Port...", #selector(configureServerPort)))
         menu.addItem(actionItem("Copy Local PAC URL", #selector(copyPACURL)))
         menu.addItem(actionItem("Copy LAN PAC URL", #selector(copyLANPACURL), enabled: lanURL != nil))
+        menu.addItem(actionItem("Copy Terminal Proxy Command", #selector(copyTerminalProxyCommand)))
         menu.addItem(.separator())
 
         menu.addItem(actionItem("Apply Auto Proxy", #selector(applyAutoProxy), enabled: settings.pacPath != nil))
@@ -331,8 +332,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func copyPACURL() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(settings.pacURL.absoluteString, forType: .string)
+        copyToPasteboard(settings.pacURL.absoluteString)
     }
 
     @objc private func copyLANPACURL() {
@@ -340,8 +340,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             showInfo("LAN PAC URL unavailable", "No active non-loopback IPv4 address was found.")
             return
         }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+        copyToPasteboard(url.absoluteString)
+    }
+
+    @objc private func copyTerminalProxyCommand() {
+        copyToPasteboard(settings.terminalProxyCommand)
     }
 
     @objc private func applyAutoProxy() {
@@ -681,6 +684,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         stack.addArrangedSubview(infoRow("Local PAC URL", settings.pacURL.absoluteString))
         stack.addArrangedSubview(infoRow("LAN PAC URL", currentLANPACURL()?.absoluteString ?? "No LAN IPv4 found"))
 
+        let copyPACButtons = NSStackView()
+        copyPACButtons.orientation = .horizontal
+        copyPACButtons.spacing = 8
+        copyPACButtons.addArrangedSubview(button("Copy Local PAC URL", action: #selector(copyPACURL)))
+        let copyLANPACButton = button("Copy LAN PAC URL", action: #selector(copyLANPACURL))
+        copyLANPACButton.isEnabled = currentLANPACURL() != nil
+        copyPACButtons.addArrangedSubview(copyLANPACButton)
+        stack.addArrangedSubview(copyPACButtons)
+
+        let terminalProxyButtons = NSStackView()
+        terminalProxyButtons.orientation = .horizontal
+        terminalProxyButtons.spacing = 8
+        terminalProxyButtons.addArrangedSubview(button("Copy Terminal Proxy Command", action: #selector(copyTerminalProxyCommand)))
+        stack.addArrangedSubview(terminalProxyButtons)
+
         let buttonRow = NSStackView()
         buttonRow.orientation = .horizontal
         buttonRow.spacing = 8
@@ -916,6 +934,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.isEnabled = false
         menu.addItem(item)
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
     }
 
     private func actionItem(_ title: String, _ selector: Selector, enabled: Bool = true) -> NSMenuItem {

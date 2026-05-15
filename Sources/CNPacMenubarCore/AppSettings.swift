@@ -168,6 +168,47 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         "http://\(proxyHost):\(httpPort)"
     }
 
+    public var terminalProxyCommand: String {
+        let primaryProxy = terminalPrimaryProxyURL.zshSingleQuoted()
+        let allProxy = terminalAllProxyURL.zshSingleQuoted()
+        let noProxyValue = noProxy.zshSingleQuoted()
+        return [
+            "export HTTP_PROXY=\(primaryProxy)",
+            "export HTTPS_PROXY=\"$HTTP_PROXY\"",
+            "export http_proxy=\"$HTTP_PROXY\"",
+            "export https_proxy=\"$HTTP_PROXY\"",
+            "export ALL_PROXY=\(allProxy)",
+            "export all_proxy=\"$ALL_PROXY\"",
+            "export FTP_PROXY=\"$HTTP_PROXY\"",
+            "export ftp_proxy=\"$FTP_PROXY\"",
+            "export grpc_proxy=\"$HTTP_PROXY\"",
+            "export NO_PROXY=\(noProxyValue)",
+            "export no_proxy=\"$NO_PROXY\""
+        ].joined(separator: "\n")
+    }
+
+    private var terminalPrimaryProxyURL: String {
+        switch proxyMode {
+        case .socks5:
+            return socksProxyURL
+        case .http, .socks5AndHTTP:
+            return httpProxyURL
+        }
+    }
+
+    private var terminalAllProxyURL: String {
+        switch proxyMode {
+        case .socks5, .socks5AndHTTP:
+            return socksProxyURL
+        case .http:
+            return httpProxyURL
+        }
+    }
+
+    private var socksProxyURL: String {
+        "socks5h://\(proxyHost):\(socks5Port)"
+    }
+
     public var proxyEndpointSummary: String {
         switch proxyMode {
         case .socks5:

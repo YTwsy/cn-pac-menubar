@@ -37,6 +37,29 @@ final class CNPacMenubarCoreTests: XCTestCase {
         XCTAssertEqual(settings.proxyStatusBarSummary, "192.168.1.103 S5:1080")
     }
 
+    func testTerminalProxyCommandUsesConfiguredProxyMode() {
+        var settings = CNPacSettings(
+            proxyHost: "192.168.1.103",
+            socks5Port: 1080,
+            httpPort: 8080,
+            proxyMode: .socks5AndHTTP,
+            noProxy: "127.0.0.1,localhost,::1"
+        )
+
+        XCTAssertTrue(settings.terminalProxyCommand.contains("export HTTP_PROXY='http://192.168.1.103:8080'"))
+        XCTAssertTrue(settings.terminalProxyCommand.contains("export ALL_PROXY='socks5h://192.168.1.103:1080'"))
+        XCTAssertTrue(settings.terminalProxyCommand.contains("export no_proxy=\"$NO_PROXY\""))
+        XCTAssertTrue(settings.terminalProxyCommand.contains("export NO_PROXY='127.0.0.1,localhost,::1'"))
+
+        settings.proxyMode = .socks5
+        XCTAssertTrue(settings.terminalProxyCommand.contains("export HTTP_PROXY='socks5h://192.168.1.103:1080'"))
+        XCTAssertTrue(settings.terminalProxyCommand.contains("export ALL_PROXY='socks5h://192.168.1.103:1080'"))
+
+        settings.proxyMode = .http
+        XCTAssertTrue(settings.terminalProxyCommand.contains("export HTTP_PROXY='http://192.168.1.103:8080'"))
+        XCTAssertTrue(settings.terminalProxyCommand.contains("export ALL_PROXY='http://192.168.1.103:8080'"))
+    }
+
     func testSettingsDecodeBackfillsVPNKeepaliveDefaults() throws {
         let data = """
         {
