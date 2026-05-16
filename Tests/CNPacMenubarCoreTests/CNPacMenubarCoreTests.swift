@@ -86,6 +86,7 @@ final class CNPacMenubarCoreTests: XCTestCase {
 
     func testVPNKeepaliveConfigurationValidatesURLAndTiming() {
         var settings = CNPacSettings(
+            pacPath: "/tmp/proxy.pac",
             vpnKeepaliveEnabled: true,
             vpnKeepaliveURL: " https://example.com/ping ",
             vpnKeepaliveIntervalSeconds: 5,
@@ -94,6 +95,7 @@ final class CNPacMenubarCoreTests: XCTestCase {
 
         let configuration = VPNKeepaliveConfiguration(settings: settings)
         XCTAssertEqual(configuration?.url.absoluteString, "https://example.com/ping")
+        XCTAssertEqual(configuration?.pacPath, "/tmp/proxy.pac")
         XCTAssertEqual(configuration?.intervalSeconds, VPNKeepaliveConfiguration.minimumIntervalSeconds)
         XCTAssertEqual(configuration?.timeoutSeconds, VPNKeepaliveConfiguration.maximumTimeoutSeconds)
 
@@ -103,6 +105,41 @@ final class CNPacMenubarCoreTests: XCTestCase {
         settings.vpnKeepaliveEnabled = false
         settings.vpnKeepaliveURL = CNPacSettings.defaultVPNKeepaliveURL
         XCTAssertNil(VPNKeepaliveConfiguration(settings: settings))
+    }
+
+    func testPACProxyResolverUsesFirstProxyDirectiveAndRejectsDirect() throws {
+        let endpoint = try PACProxyResolver.firstProxy(from: "SOCKS5 192.168.1.103:1080; PROXY 192.168.1.103:8080; DIRECT;")
+
+        XCTAssertEqual(endpoint, PACProxyEndpoint(kind: .socks5, host: "192.168.1.103", port: 1080))
+        XCTAssertEqual(endpoint.displayName, "SOCKS5 192.168.1.103:1080")
+
+        XCTAssertThrowsError(try PACProxyResolver.firstProxy(from: "DIRECT; PROXY 192.168.1.103:8080;")) { error in
+            XCTAssertEqual(error as? PACProxyResolverError, .directSelected)
+        }
+    }
+
+    func testPACProxyResolverEvaluatesSelectedPACForTargetURL() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let pacURL = root.appendingPathComponent("proxy.pac")
+        try """
+        function FindProxyForURL(url, host) {
+          if (dnsDomainIs(host, "gstatic.com")) {
+            return "SOCKS5 192.168.1.103:1080; PROXY 192.168.1.103:8080; DIRECT;";
+          }
+          return "DIRECT";
+        }
+        """.write(to: pacURL, atomically: true, encoding: .utf8)
+
+        let googleURL = try XCTUnwrap(URL(string: "https://www.gstatic.com/generate_204"))
+        let endpoint = try PACProxyResolver.firstProxy(for: googleURL, pacPath: pacURL.path)
+        XCTAssertEqual(endpoint, PACProxyEndpoint(kind: .socks5, host: "192.168.1.103", port: 1080))
+
+        let directURL = try XCTUnwrap(URL(string: "https://example.cn/"))
+        XCTAssertThrowsError(try PACProxyResolver.firstProxy(for: directURL, pacPath: pacURL.path)) { error in
+            XCTAssertEqual(error as? PACProxyResolverError, .directSelected)
+        }
     }
 
     func testVPNKeepaliveStatusDetailShowsClockTimesWithoutStaleCountdown() throws {

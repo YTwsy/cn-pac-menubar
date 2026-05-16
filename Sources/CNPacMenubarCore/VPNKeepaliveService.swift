@@ -7,6 +7,7 @@ public struct VPNKeepaliveConfiguration: Equatable, Sendable {
     public static let maximumTimeoutSeconds = 120
 
     public var url: URL
+    public var pacPath: String?
     public var intervalSeconds: Int
     public var timeoutSeconds: Int
 
@@ -16,6 +17,7 @@ public struct VPNKeepaliveConfiguration: Equatable, Sendable {
             return nil
         }
         self.url = url
+        self.pacPath = settings.pacPath
         self.intervalSeconds = Self.normalizedIntervalSeconds(settings.vpnKeepaliveIntervalSeconds)
         self.timeoutSeconds = Self.normalizedTimeoutSeconds(settings.vpnKeepaliveTimeoutSeconds)
     }
@@ -144,6 +146,7 @@ public final class VPNKeepaliveService: @unchecked Sendable {
     private var currentStatus = VPNKeepaliveStatus.disabled
     private var configuration: VPNKeepaliveConfiguration?
     private var timer: DispatchSourceTimer?
+    private var session: URLSession?
     private var task: URLSessionDataTask?
     private var activeRequestID: UUID?
     private var lastResult: VPNKeepaliveResult?
@@ -222,6 +225,19 @@ public final class VPNKeepaliveService: @unchecked Sendable {
             lastResult: lastResult
         ))
 
+        let proxyEndpoint: PACProxyEndpoint
+        do {
+            proxyEndpoint = try PACProxyResolver.firstProxy(for: configuration.url, pacPath: configuration.pacPath)
+        } catch {
+            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            failActiveRequest(
+                requestID: requestID,
+                configuration: configuration,
+                message: message
+            )
+            return
+        }
+
         var request = URLRequest(
             url: configuration.url,
             cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
@@ -231,7 +247,14 @@ public final class VPNKeepaliveService: @unchecked Sendable {
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         request.setValue("cn-pac-menubar/1.0", forHTTPHeaderField: "User-Agent")
 
-        let task = URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        sessionConfiguration.timeoutIntervalForRequest = TimeInterval(configuration.timeoutSeconds)
+        sessionConfiguration.timeoutIntervalForResource = TimeInterval(configuration.timeoutSeconds)
+        sessionConfiguration.connectionProxyDictionary = proxyEndpoint.urlSessionProxyDictionary
+
+        let session = URLSession(configuration: sessionConfiguration)
+        let task = session.dataTask(with: request) { [weak self] _, response, error in
             let statusCode = (response as? HTTPURLResponse)?.statusCode
             let errorMessage = error.map { ($0 as NSError).localizedDescription }
             self?.queue.async {
@@ -244,8 +267,28 @@ public final class VPNKeepaliveService: @unchecked Sendable {
                 )
             }
         }
+        self.session = session
         self.task = task
         task.resume()
+    }
+
+    private func failActiveRequest(
+        requestID: UUID,
+        configuration: VPNKeepaliveConfiguration,
+        message: String
+    ) {
+        guard activeRequestID == requestID, self.configuration == configuration else {
+            return
+        }
+
+        activeRequestID = nil
+        task = nil
+        session?.invalidateAndCancel()
+        session = nil
+
+        let result = VPNKeepaliveResult.failure(completedAt: Date(), message: message)
+        lastResult = result
+        scheduleNext(configuration: configuration)
     }
 
     private func finishRequest(
@@ -261,6 +304,8 @@ public final class VPNKeepaliveService: @unchecked Sendable {
 
         activeRequestID = nil
         task = nil
+        session?.finishTasksAndInvalidate()
+        session = nil
 
         let completedAt = Date()
         let durationMilliseconds = max(0, Int((completedAt.timeIntervalSince(startedAt) * 1_000).rounded()))
@@ -319,6 +364,8 @@ public final class VPNKeepaliveService: @unchecked Sendable {
         activeRequestID = nil
         task?.cancel()
         task = nil
+        session?.invalidateAndCancel()
+        session = nil
     }
 
     private func publish(_ status: VPNKeepaliveStatus) {

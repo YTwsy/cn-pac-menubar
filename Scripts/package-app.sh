@@ -22,6 +22,7 @@ else
     "$ROOT_DIR/Sources/CNPacMenubarCore/AppSettings.swift"
     "$ROOT_DIR/Sources/CNPacMenubarCore/SettingsStore.swift"
     "$ROOT_DIR/Sources/CNPacMenubarCore/PACRewriter.swift"
+    "$ROOT_DIR/Sources/CNPacMenubarCore/PACProxyResolver.swift"
     "$ROOT_DIR/Sources/CNPacMenubarCore/PACServer.swift"
     "$ROOT_DIR/Sources/CNPacMenubarCore/SystemProxyManager.swift"
     "$ROOT_DIR/Sources/CNPacMenubarCore/LauncherManager.swift"

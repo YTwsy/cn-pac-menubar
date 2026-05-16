@@ -34,7 +34,7 @@ Generated proxy launchers read `settings.json` every time they start, so updatin
 
 ## Google VPN Keepalive
 
-The menu includes **Google VPN Keepalive** for sending a lightweight scheduled request while the app is running. Enable it from the menu or main window, then use **Keepalive Settings...** to adjust:
+The menu includes **Google VPN Keepalive** for sending a strict scheduled PAC proxy probe while the app is running. It evaluates the selected PAC for the target URL, uses the first proxy directive explicitly, and treats `DIRECT` as a failed keepalive path. Enable it from the menu or main window, then use **Keepalive Settings...** to adjust:
 
 - Target URL, defaulting to `https://www.gstatic.com/generate_204`.
 - Interval in seconds, from 30 seconds to 24 hours.
