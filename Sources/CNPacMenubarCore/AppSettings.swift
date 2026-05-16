@@ -60,6 +60,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
     public var socks5Port: Int
     public var httpPort: Int
     public var proxyMode: ProxyMode
+    public var allowDirectFallback: Bool
     public var noProxy: String
     public var launchAtLogin: Bool
     public var vpnKeepaliveEnabled: Bool
@@ -76,6 +77,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         socks5Port: Int = 1080,
         httpPort: Int = 8080,
         proxyMode: ProxyMode = .socks5AndHTTP,
+        allowDirectFallback: Bool = false,
         noProxy: String = "127.0.0.1,localhost,::1",
         launchAtLogin: Bool = false,
         vpnKeepaliveEnabled: Bool = false,
@@ -91,6 +93,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         self.socks5Port = socks5Port
         self.httpPort = httpPort
         self.proxyMode = proxyMode
+        self.allowDirectFallback = allowDirectFallback
         self.noProxy = noProxy
         self.launchAtLogin = launchAtLogin
         self.vpnKeepaliveEnabled = vpnKeepaliveEnabled
@@ -108,6 +111,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         case socks5Port
         case httpPort
         case proxyMode
+        case allowDirectFallback
         case noProxy
         case launchAtLogin
         case vpnKeepaliveEnabled
@@ -128,6 +132,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
             socks5Port: try container.decodeIfPresent(Int.self, forKey: .socks5Port) ?? defaults.socks5Port,
             httpPort: try container.decodeIfPresent(Int.self, forKey: .httpPort) ?? defaults.httpPort,
             proxyMode: try container.decodeIfPresent(ProxyMode.self, forKey: .proxyMode) ?? defaults.proxyMode,
+            allowDirectFallback: try container.decodeIfPresent(Bool.self, forKey: .allowDirectFallback) ?? defaults.allowDirectFallback,
             noProxy: try container.decodeIfPresent(String.self, forKey: .noProxy) ?? defaults.noProxy,
             launchAtLogin: try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? defaults.launchAtLogin,
             vpnKeepaliveEnabled: try container.decodeIfPresent(Bool.self, forKey: .vpnKeepaliveEnabled) ?? defaults.vpnKeepaliveEnabled,
@@ -147,6 +152,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         try container.encode(socks5Port, forKey: .socks5Port)
         try container.encode(httpPort, forKey: .httpPort)
         try container.encode(proxyMode, forKey: .proxyMode)
+        try container.encode(allowDirectFallback, forKey: .allowDirectFallback)
         try container.encode(noProxy, forKey: .noProxy)
         try container.encode(launchAtLogin, forKey: .launchAtLogin)
         try container.encode(vpnKeepaliveEnabled, forKey: .vpnKeepaliveEnabled)
@@ -244,15 +250,27 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         }
     }
 
+    public var proxyFailureBehaviorSummary: String {
+        allowDirectFallback ? "DIRECT fallback allowed" : "No DIRECT fallback"
+    }
+
     public var pacProxyExpression: String {
+        var rules: [String]
         switch proxyMode {
         case .socks5:
-            return "SOCKS5 \(proxyHost):\(socks5Port); DIRECT;"
+            rules = ["SOCKS5 \(proxyHost):\(socks5Port)"]
         case .http:
-            return "PROXY \(proxyHost):\(httpPort); DIRECT;"
+            rules = ["PROXY \(proxyHost):\(httpPort)"]
         case .socks5AndHTTP:
-            return "SOCKS5 \(proxyHost):\(socks5Port); PROXY \(proxyHost):\(httpPort); DIRECT;"
+            rules = [
+                "SOCKS5 \(proxyHost):\(socks5Port)",
+                "PROXY \(proxyHost):\(httpPort)"
+            ]
         }
+        if allowDirectFallback {
+            rules.append("DIRECT")
+        }
+        return rules.joined(separator: "; ")
     }
 
     public mutating func rememberPACPath(_ path: String) {

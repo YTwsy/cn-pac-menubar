@@ -32,6 +32,12 @@ Settings are stored in:
 
 Generated proxy launchers read `settings.json` every time they start, so updating the HTTP proxy host or port in CN PAC Menubar changes future launcher sessions without rebuilding the launcher.
 
+## PAC Proxy Fallback
+
+Proxy rules fail closed by default: generated PAC proxy chains omit a final `DIRECT`, so a host that should use the proxy will fail if all configured proxies are unavailable instead of silently connecting directly.
+
+Use **Proxy > Allow DIRECT Fallback** if you explicitly want the old behavior where PAC clients try `DIRECT` after the SOCKS5/HTTP proxy endpoints fail. Built-in direct rules for private IPs and direct-domain matches still return `DIRECT` either way.
+
 ## Google VPN Keepalive
 
 The menu includes **Google VPN Keepalive** for sending a strict scheduled PAC proxy probe while the app is running. It evaluates the selected PAC for the target URL, uses the first proxy directive explicitly, and treats `DIRECT` as a failed keepalive path. Enable it from the menu or main window, then use **Keepalive Settings...** to adjust:

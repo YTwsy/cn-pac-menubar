@@ -5,13 +5,32 @@ import Network
 final class CNPacMenubarCoreTests: XCTestCase {
     func testProxyExpressions() {
         var settings = CNPacSettings(proxyHost: "192.168.1.103", socks5Port: 1080, httpPort: 8080, proxyMode: .socks5AndHTTP)
-        XCTAssertEqual(settings.pacProxyExpression, "SOCKS5 192.168.1.103:1080; PROXY 192.168.1.103:8080; DIRECT;")
+        XCTAssertEqual(settings.pacProxyExpression, "SOCKS5 192.168.1.103:1080; PROXY 192.168.1.103:8080")
+        XCTAssertEqual(settings.proxyFailureBehaviorSummary, "No DIRECT fallback")
 
         settings.proxyMode = .http
-        XCTAssertEqual(settings.pacProxyExpression, "PROXY 192.168.1.103:8080; DIRECT;")
+        XCTAssertEqual(settings.pacProxyExpression, "PROXY 192.168.1.103:8080")
 
         settings.proxyMode = .socks5
-        XCTAssertEqual(settings.pacProxyExpression, "SOCKS5 192.168.1.103:1080; DIRECT;")
+        XCTAssertEqual(settings.pacProxyExpression, "SOCKS5 192.168.1.103:1080")
+    }
+
+    func testProxyExpressionsCanAllowDirectFallback() {
+        var settings = CNPacSettings(
+            proxyHost: "192.168.1.103",
+            socks5Port: 1080,
+            httpPort: 8080,
+            proxyMode: .socks5AndHTTP,
+            allowDirectFallback: true
+        )
+        XCTAssertEqual(settings.pacProxyExpression, "SOCKS5 192.168.1.103:1080; PROXY 192.168.1.103:8080; DIRECT")
+        XCTAssertEqual(settings.proxyFailureBehaviorSummary, "DIRECT fallback allowed")
+
+        settings.proxyMode = .http
+        XCTAssertEqual(settings.pacProxyExpression, "PROXY 192.168.1.103:8080; DIRECT")
+
+        settings.proxyMode = .socks5
+        XCTAssertEqual(settings.pacProxyExpression, "SOCKS5 192.168.1.103:1080; DIRECT")
     }
 
     func testPACURLCanUseLoopbackOrLANHost() {
@@ -78,6 +97,7 @@ final class CNPacMenubarCoreTests: XCTestCase {
 
         XCTAssertEqual(settings.pacServerPort, 8123)
         XCTAssertTrue(settings.launchAtLogin)
+        XCTAssertFalse(settings.allowDirectFallback)
         XCTAssertFalse(settings.vpnKeepaliveEnabled)
         XCTAssertEqual(settings.vpnKeepaliveURL, CNPacSettings.defaultVPNKeepaliveURL)
         XCTAssertEqual(settings.vpnKeepaliveIntervalSeconds, 300)
@@ -200,9 +220,29 @@ final class CNPacMenubarCoreTests: XCTestCase {
         let result = PACRewriter.rewrite(pac, settings: settings)
         XCTAssertTrue(result.changedProxyRules)
         XCTAssertTrue(result.warnings.isEmpty)
-        XCTAssertTrue(result.content.contains("SOCKS5 192.168.1.103:1080; PROXY 192.168.1.103:8080; DIRECT;"))
+        XCTAssertTrue(result.content.contains("SOCKS5 192.168.1.103:1080; PROXY 192.168.1.103:8080"))
+        XCTAssertFalse(result.content.contains("SOCKS5 192.168.1.103:1080; PROXY 192.168.1.103:8080; DIRECT"))
         XCTAssertFalse(result.content.contains("%mixed-port%"))
         XCTAssertTrue(result.content.contains("return \"DIRECT\";"))
+    }
+
+    func testPACRewriterCanKeepDirectFallbackWhenEnabled() {
+        let pac = """
+        function FindProxyForURL(url, host) {
+          return "SOCKS5 127.0.0.1:%mixed-port%; PROXY 127.0.0.1:%mixed-port%; DIRECT;";
+        }
+        """
+        let settings = CNPacSettings(
+            proxyHost: "192.168.1.103",
+            socks5Port: 1080,
+            httpPort: 8080,
+            proxyMode: .socks5AndHTTP,
+            allowDirectFallback: true
+        )
+        let result = PACRewriter.rewrite(pac, settings: settings)
+
+        XCTAssertTrue(result.changedProxyRules)
+        XCTAssertTrue(result.content.contains("SOCKS5 192.168.1.103:1080; PROXY 192.168.1.103:8080; DIRECT"))
     }
 
     func testPACRewriterWarnsWhenNoSafeRuleFound() {

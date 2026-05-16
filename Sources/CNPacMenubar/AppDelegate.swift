@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private weak var proxyHostField: NSTextField?
     private weak var socks5PortField: NSTextField?
     private weak var httpPortField: NSTextField?
+    private weak var allowDirectFallbackCheckbox: NSButton?
     private var statusMenuOpenDepth = 0
     private weak var menuVPNKeepaliveSummaryItem: NSMenuItem?
     private weak var menuVPNKeepaliveParentItem: NSMenuItem?
@@ -189,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let submenu = NSMenu()
         addDisabled("Host: \(settings.proxyHost)", to: submenu)
         addDisabled("SOCKS5: \(settings.socks5Port) · HTTP: \(settings.httpPort)", to: submenu)
+        addDisabled("Fallback: \(settings.proxyFailureBehaviorSummary)", to: submenu)
         addDisabled("PAC Rule: \(settings.pacProxyExpression)", to: submenu)
         submenu.addItem(.separator())
         for mode in ProxyMode.allCases {
@@ -197,6 +199,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             modeItem.state = settings.proxyMode == mode ? .on : .off
             submenu.addItem(modeItem)
         }
+        submenu.addItem(.separator())
+        let directFallbackItem = actionItem("Allow DIRECT Fallback", #selector(toggleDirectFallback))
+        directFallbackItem.state = settings.allowDirectFallback ? .on : .off
+        submenu.addItem(directFallbackItem)
         submenu.addItem(.separator())
         submenu.addItem(actionItem("Set SOCKS5 Port...", #selector(configureSocks5Port)))
         submenu.addItem(actionItem("Set HTTP Port...", #selector(configureHTTPPort)))
@@ -434,6 +440,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         settings.proxyHost = result.host
         settings.httpPort = result.httpPort
         settings.socks5Port = result.socks5Port
+        settings.allowDirectFallback = result.allowDirectFallback
         settings.noProxy = result.noProxy
         commitProxySettings()
     }
@@ -460,6 +467,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             return
         }
         settings.proxyHost = host
+        commitProxySettings()
+    }
+
+    @objc private func toggleDirectFallback() {
+        settings.allowDirectFallback.toggle()
         commitProxySettings()
     }
 
@@ -492,6 +504,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         settings.proxyHost = host
         settings.socks5Port = socksPort
         settings.httpPort = httpPort
+        settings.allowDirectFallback = allowDirectFallbackCheckbox?.state == .on
         commitProxySettings()
     }
 
@@ -609,6 +622,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         settings.proxyHost = result.host
         settings.httpPort = result.httpPort
         settings.socks5Port = result.socks5Port
+        settings.allowDirectFallback = result.allowDirectFallback
         settings.noProxy = result.noProxy
         do {
             if serverWasActive {
@@ -677,6 +691,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         proxyHostField = nil
         socks5PortField = nil
         httpPortField = nil
+        allowDirectFallbackCheckbox = nil
 
         let root = NSView()
         let stack = NSStackView()
@@ -748,6 +763,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
         stack.addArrangedSubview(separator())
         stack.addArrangedSubview(sectionTitle("Proxy"))
+        stack.addArrangedSubview(infoRow("Fallback", settings.proxyFailureBehaviorSummary))
         stack.addArrangedSubview(proxyQuickEditor())
 
         stack.addArrangedSubview(separator())
@@ -800,14 +816,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let host = textField(settings.proxyHost, width: 180)
         let socks = textField("\(settings.socks5Port)", width: 110)
         let http = textField("\(settings.httpPort)", width: 110)
+        let directFallback = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+        directFallback.state = settings.allowDirectFallback ? .on : .off
         self.proxyHostField = host
         self.socks5PortField = socks
         self.httpPortField = http
+        self.allowDirectFallbackCheckbox = directFallback
 
         container.addArrangedSubview(controlRow("Protocol", modePopup))
         container.addArrangedSubview(controlRow("Host", host))
         container.addArrangedSubview(controlRow("SOCKS5 Port", socks))
         container.addArrangedSubview(controlRow("HTTP Port", http))
+        container.addArrangedSubview(controlRow("Allow DIRECT Fallback", directFallback))
 
         let apply = button("Apply Proxy", action: #selector(applyQuickProxySettings))
         container.addArrangedSubview(apply)
@@ -1116,6 +1136,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let socks = NSTextField(string: "\(settings.socks5Port)")
         let noProxy = NSTextField(string: settings.noProxy)
         let pacPort = NSTextField(string: "\(settings.pacServerPort)")
+        let allowDirectFallback = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+        allowDirectFallback.state = settings.allowDirectFallback ? .on : .off
 
         let grid = NSGridView()
         grid.rowSpacing = 8
@@ -1123,11 +1145,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         grid.addRow(with: [label("Proxy Host"), host])
         grid.addRow(with: [label("HTTP Port"), http])
         grid.addRow(with: [label("SOCKS5 Port"), socks])
+        grid.addRow(with: [label("Allow DIRECT Fallback"), allowDirectFallback])
         grid.addRow(with: [label("NO_PROXY"), noProxy])
         if includePACServerPort {
             grid.addRow(with: [label("PAC Server Port"), pacPort])
         }
-        grid.frame = NSRect(x: 0, y: 0, width: 360, height: includePACServerPort ? 160 : 128)
+        grid.frame = NSRect(x: 0, y: 0, width: 390, height: includePACServerPort ? 190 : 160)
         host.frame.size.width = 220
         http.frame.size.width = 220
         socks.frame.size.width = 220
@@ -1150,6 +1173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             host: host.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
             httpPort: httpPort,
             socks5Port: socksPort,
+            allowDirectFallback: allowDirectFallback.state == .on,
             noProxy: noProxy.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
             pacServerPort: pacServerPort
         )
@@ -1179,6 +1203,7 @@ private struct SettingsFormResult {
     var host: String
     var httpPort: Int
     var socks5Port: Int
+    var allowDirectFallback: Bool
     var noProxy: String
     var pacServerPort: Int
 }
