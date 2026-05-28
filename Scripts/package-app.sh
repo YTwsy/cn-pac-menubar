@@ -7,6 +7,11 @@ CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 FRAMEWORKS_DIR="$CONTENTS_DIR/Frameworks"
 DIRECT_DIR="$ROOT_DIR/.build/direct"
+VERSION_FILE="$ROOT_DIR/VERSION"
+APP_VERSION="${APP_VERSION:-$(tr -d '[:space:]' < "$VERSION_FILE")}"
+APP_BUILD_NUMBER="${APP_BUILD_NUMBER:-1}"
+export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$ROOT_DIR/.build/ModuleCache}"
+mkdir -p "$CLANG_MODULE_CACHE_PATH"
 
 if swift build --package-path "$ROOT_DIR" -c release; then
   BUILT_EXECUTABLE="$ROOT_DIR/.build/release/CNPacMenubar"
@@ -66,7 +71,7 @@ if [[ -n "$BUILT_CORE_DYLIB" ]]; then
   cp "$BUILT_CORE_DYLIB" "$FRAMEWORKS_DIR/libCNPacMenubarCore.dylib"
 fi
 
-cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
+cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -77,8 +82,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key><string>CNPacMenubar</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>${APP_VERSION}</string>
+  <key>CFBundleVersion</key><string>${APP_BUILD_NUMBER}</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
 </dict>

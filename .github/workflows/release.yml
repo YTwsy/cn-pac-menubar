@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish macOS app
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        run: swift test
+
+      - name: Package app
+        run: APP_VERSION="${{ steps.version.outputs.version }}" APP_BUILD_NUMBER="${{ github.run_number }}" Scripts/package-app.sh
+
+      - name: Archive app
+        run: |
+          ZIP_NAME="CNPacMenubar-v${{ steps.version.outputs.version }}-macos.zip"
+          ditto --norsrc --noextattr -c -k --keepParent .build/CNPacMenubar.app ".build/${ZIP_NAME}"
+          echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes_file="$(mktemp)"
+          cat > "$notes_file" <<'NOTES'
+          Initial public release of CN PAC Menubar.
+
+          Highlights:
+          - Serve and rewrite PAC files from the macOS menu bar.
+          - Apply macOS automatic proxy configuration.
+          - Generate per-app proxy launchers.
+          - Share a LAN PAC URL for devices on the same network.
+          - Run strict Google VPN keepalive probes through the selected PAC proxy path.
+          NOTES
+          gh release create "${GITHUB_REF_NAME}" ".build/${ZIP_NAME}" --verify-tag --title "CN PAC Menubar ${GITHUB_REF_NAME}" --notes-file "$notes_file"

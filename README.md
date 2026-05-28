@@ -1,6 +1,17 @@
 # CN PAC Menubar
 
+[中文说明](README.zh-CN.md)
+
 macOS 13+ status-bar utility for serving PAC files, applying macOS automatic proxy configuration, and launching selected apps with `HTTP_PROXY`/`HTTPS_PROXY` environment variables.
+
+## Features
+
+- Serve a selected PAC file from a local menu-bar app.
+- Rewrite proxy directives to the configured SOCKS5/HTTP endpoints.
+- Apply macOS automatic proxy settings without changing the rest of the network stack manually.
+- Copy a LAN PAC URL for phones, tablets, and other computers on the same network.
+- Generate per-app proxy launchers for apps that honor environment variables or Chromium/Java proxy flags.
+- Run a strict Google VPN keepalive probe through the PAC-resolved proxy path.
 
 ## Build
 
@@ -13,6 +24,12 @@ Scripts/package-app.sh
 The packaged app is written to `.build/CNPacMenubar.app`.
 
 `Scripts/package-app.sh` first tries SwiftPM. If the local Command Line Tools installation cannot satisfy SwiftPM's macOS platform lookup, the script falls back to a direct `swiftc` build with the installed macOS SDK.
+
+The bundle version comes from `VERSION` by default. Release builds can override it:
+
+```sh
+APP_VERSION=1.0 APP_BUILD_NUMBER=1 Scripts/package-app.sh
+```
 
 ## Install Locally
 
@@ -62,3 +79,16 @@ Launchers now choose a profile for the target app:
 - Chromium/Electron: adds Chromium proxy flags like `--proxy-server` and `--proxy-bypass-list` in addition to proxy variables.
 - Java: adds `JAVA_TOOL_OPTIONS` JVM proxy properties in addition to proxy variables.
 - System PAC preferred: marks Apple/system apps that may ignore launcher variables and are better handled by macOS automatic proxy configuration.
+
+## Release
+
+Releases are driven by version tags:
+
+```sh
+VERSION="$(cat VERSION)"
+git tag "v${VERSION}"
+git push origin main
+git push origin "v${VERSION}"
+```
+
+The `Release` GitHub Actions workflow builds the app, creates `CNPacMenubar-vVERSION-macos.zip`, and publishes a GitHub Release for the tag. See [docs/RELEASE.md](docs/RELEASE.md) for the full process.
