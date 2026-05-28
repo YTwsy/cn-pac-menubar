@@ -507,7 +507,19 @@ final class CNPacMenubarCoreTests: XCTestCase {
         )
         try store.saveLauncherIndex(LauncherIndex(launchers: [record]))
 
-        XCTAssertEqual(try manager.refreshManagedLaunchers().launchers, [record])
+        let refreshed = try manager.refreshManagedLaunchers()
+        let refreshedRecord = try XCTUnwrap(refreshed.launchers.first)
+
+        XCTAssertEqual(refreshed.launchers.count, 1)
+        XCTAssertEqual(refreshedRecord.id, record.id)
+        XCTAssertEqual(refreshedRecord.displayName, record.displayName)
+        XCTAssertEqual(refreshedRecord.targetAppPath, record.targetAppPath)
+        XCTAssertEqual(refreshedRecord.launcherAppPath, record.launcherAppPath)
+        XCTAssertEqual(refreshedRecord.bundleIdentifier, record.bundleIdentifier)
+        XCTAssertEqual(refreshedRecord.launcherProfile, record.launcherProfile)
+        XCTAssertEqual(refreshedRecord.createdAt.timeIntervalSince1970, record.createdAt.timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertNil(refreshedRecord.lastLaunchedAt)
+        XCTAssertFalse(refreshedRecord.managedByTool)
     }
 
     private func makeTestApp(name: String, info: [String: Any]) throws -> URL {
