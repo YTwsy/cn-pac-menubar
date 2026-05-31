@@ -498,11 +498,13 @@ final class CNPacMenubarCoreTests: XCTestCase {
 
         let store = try SettingsStore(appSupportDirectory: root.appendingPathComponent("Support", isDirectory: true))
         let manager = LauncherManager(store: store)
+        let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
         let record = LauncherRecord(
             displayName: "Legacy Proxy",
             targetAppPath: "/Applications/Codex.app",
             launcherAppPath: launcher.path,
             bundleIdentifier: "local.legacy.proxy",
+            createdAt: createdAt,
             managedByTool: false
         )
         try store.saveLauncherIndex(LauncherIndex(launchers: [record]))
@@ -517,7 +519,7 @@ final class CNPacMenubarCoreTests: XCTestCase {
         XCTAssertEqual(refreshedRecord.launcherAppPath, record.launcherAppPath)
         XCTAssertEqual(refreshedRecord.bundleIdentifier, record.bundleIdentifier)
         XCTAssertEqual(refreshedRecord.launcherProfile, record.launcherProfile)
-        XCTAssertEqual(refreshedRecord.createdAt.timeIntervalSince1970, record.createdAt.timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertEqual(refreshedRecord.createdAt, createdAt)
         XCTAssertNil(refreshedRecord.lastLaunchedAt)
         XCTAssertFalse(refreshedRecord.managedByTool)
     }
