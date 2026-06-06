@@ -67,6 +67,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
     public var vpnKeepaliveURL: String
     public var vpnKeepaliveIntervalSeconds: Int
     public var vpnKeepaliveTimeoutSeconds: Int
+    public var vpnKeepaliveFailureIndicatorEnabled: Bool
     public var refreshVersion: Int
 
     public init(
@@ -84,6 +85,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         vpnKeepaliveURL: String = CNPacSettings.defaultVPNKeepaliveURL,
         vpnKeepaliveIntervalSeconds: Int = 300,
         vpnKeepaliveTimeoutSeconds: Int = 10,
+        vpnKeepaliveFailureIndicatorEnabled: Bool = true,
         refreshVersion: Int = 1
     ) {
         self.pacPath = pacPath
@@ -100,6 +102,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         self.vpnKeepaliveURL = vpnKeepaliveURL
         self.vpnKeepaliveIntervalSeconds = vpnKeepaliveIntervalSeconds
         self.vpnKeepaliveTimeoutSeconds = vpnKeepaliveTimeoutSeconds
+        self.vpnKeepaliveFailureIndicatorEnabled = vpnKeepaliveFailureIndicatorEnabled
         self.refreshVersion = refreshVersion
     }
 
@@ -118,6 +121,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         case vpnKeepaliveURL
         case vpnKeepaliveIntervalSeconds
         case vpnKeepaliveTimeoutSeconds
+        case vpnKeepaliveFailureIndicatorEnabled
         case refreshVersion
     }
 
@@ -139,6 +143,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
             vpnKeepaliveURL: try container.decodeIfPresent(String.self, forKey: .vpnKeepaliveURL) ?? defaults.vpnKeepaliveURL,
             vpnKeepaliveIntervalSeconds: try container.decodeIfPresent(Int.self, forKey: .vpnKeepaliveIntervalSeconds) ?? defaults.vpnKeepaliveIntervalSeconds,
             vpnKeepaliveTimeoutSeconds: try container.decodeIfPresent(Int.self, forKey: .vpnKeepaliveTimeoutSeconds) ?? defaults.vpnKeepaliveTimeoutSeconds,
+            vpnKeepaliveFailureIndicatorEnabled: try container.decodeIfPresent(Bool.self, forKey: .vpnKeepaliveFailureIndicatorEnabled) ?? defaults.vpnKeepaliveFailureIndicatorEnabled,
             refreshVersion: try container.decodeIfPresent(Int.self, forKey: .refreshVersion) ?? defaults.refreshVersion
         )
     }
@@ -159,6 +164,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         try container.encode(vpnKeepaliveURL, forKey: .vpnKeepaliveURL)
         try container.encode(vpnKeepaliveIntervalSeconds, forKey: .vpnKeepaliveIntervalSeconds)
         try container.encode(vpnKeepaliveTimeoutSeconds, forKey: .vpnKeepaliveTimeoutSeconds)
+        try container.encode(vpnKeepaliveFailureIndicatorEnabled, forKey: .vpnKeepaliveFailureIndicatorEnabled)
         try container.encode(refreshVersion, forKey: .refreshVersion)
     }
 

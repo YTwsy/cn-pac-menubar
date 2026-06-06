@@ -102,6 +102,16 @@ final class CNPacMenubarCoreTests: XCTestCase {
         XCTAssertEqual(settings.vpnKeepaliveURL, CNPacSettings.defaultVPNKeepaliveURL)
         XCTAssertEqual(settings.vpnKeepaliveIntervalSeconds, 300)
         XCTAssertEqual(settings.vpnKeepaliveTimeoutSeconds, 10)
+        XCTAssertTrue(settings.vpnKeepaliveFailureIndicatorEnabled)
+    }
+
+    func testSettingsRoundTripsVPNKeepaliveFailureIndicatorToggle() throws {
+        let settings = CNPacSettings(vpnKeepaliveFailureIndicatorEnabled: false)
+        let data = try JSONEncoder().encode(settings)
+
+        let decoded = try JSONDecoder().decode(CNPacSettings.self, from: data)
+
+        XCTAssertFalse(decoded.vpnKeepaliveFailureIndicatorEnabled)
     }
 
     func testVPNKeepaliveConfigurationValidatesURLAndTiming() {
@@ -188,6 +198,28 @@ final class CNPacMenubarCoreTests: XCTestCase {
 
         XCTAssertEqual(status.detail, "HTTP 204 at 23:03:09 (2351 ms); next at 23:08:09")
         XCTAssertEqual(running.detail, "Request in progress since 23:03:09")
+    }
+
+    func testVPNKeepaliveStatusTracksFailedLastResultForIconIndicator() {
+        let failed = VPNKeepaliveStatus(
+            isEnabled: true,
+            isRunning: false,
+            lastResult: .failure(completedAt: Date(timeIntervalSince1970: 1_700_000_000), message: "timed out")
+        )
+        let successful = VPNKeepaliveStatus(
+            isEnabled: true,
+            isRunning: false,
+            lastResult: .success(completedAt: Date(timeIntervalSince1970: 1_700_000_000), statusCode: 204, durationMilliseconds: 120)
+        )
+        let disabled = VPNKeepaliveStatus(
+            isEnabled: false,
+            isRunning: false,
+            lastResult: .failure(completedAt: Date(timeIntervalSince1970: 1_700_000_000), message: "timed out")
+        )
+
+        XCTAssertTrue(failed.hasFailedLastResult)
+        XCTAssertFalse(successful.hasFailedLastResult)
+        XCTAssertFalse(disabled.hasFailedLastResult)
     }
 
     func testPACServerStateDetails() {

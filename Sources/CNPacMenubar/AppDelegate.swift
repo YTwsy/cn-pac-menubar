@@ -24,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private weak var menuVPNKeepaliveParentItem: NSMenuItem?
     private weak var menuVPNKeepaliveStatusItem: NSMenuItem?
     private weak var menuVPNKeepaliveCheckButton: NSButton?
+    private weak var menuVPNKeepaliveFailureIndicatorItem: NSMenuItem?
+    private var statusFailureDotView: NSView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -115,6 +117,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         guard let button = statusItem?.button else { return }
         button.title = "PAC"
         button.toolTip = "CN PAC Menubar"
+        updateStatusFailureDot(on: button)
+    }
+
+    private var shouldShowKeepaliveFailureIndicator: Bool {
+        settings.vpnKeepaliveFailureIndicatorEnabled && keepaliveService.status.hasFailedLastResult
+    }
+
+    private func updateStatusFailureDot(on button: NSStatusBarButton) {
+        guard shouldShowKeepaliveFailureIndicator else {
+            statusFailureDotView?.removeFromSuperview()
+            statusFailureDotView = nil
+            return
+        }
+
+        if let statusFailureDotView {
+            if statusFailureDotView.superview === button {
+                return
+            }
+            statusFailureDotView.removeFromSuperview()
+        }
+
+        let dot = StatusFailureDotView()
+        dot.wantsLayer = true
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.layer?.backgroundColor = NSColor.systemRed.cgColor
+        dot.layer?.cornerRadius = 3.5
+        button.addSubview(dot)
+        NSLayoutConstraint.activate([
+            dot.widthAnchor.constraint(equalToConstant: 7),
+            dot.heightAnchor.constraint(equalToConstant: 7),
+            dot.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 15),
+            dot.bottomAnchor.constraint(equalTo: button.bottomAnchor, constant: -3)
+        ])
+        statusFailureDotView = dot
     }
 
     private func rebuildMenu() {
@@ -226,6 +262,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         toggle.state = settings.vpnKeepaliveEnabled ? .on : .off
         submenu.addItem(toggle)
         submenu.addItem(keepaliveCheckNowItem(enabled: settings.vpnKeepaliveEnabled))
+        let failureIndicator = actionItem("Show Failure Dot in Menu Bar Icon", #selector(toggleVPNKeepaliveFailureIndicator))
+        failureIndicator.state = settings.vpnKeepaliveFailureIndicatorEnabled ? .on : .off
+        menuVPNKeepaliveFailureIndicatorItem = failureIndicator
+        submenu.addItem(failureIndicator)
         submenu.addItem(actionItem("Keepalive Settings...", #selector(configureVPNKeepalive)))
 
         item.submenu = submenu
@@ -518,12 +558,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         refreshUI()
     }
 
+    @objc private func toggleVPNKeepaliveFailureIndicator() {
+        settings.vpnKeepaliveFailureIndicatorEnabled.toggle()
+        do {
+            try store.saveSettings(settings)
+        } catch {
+            showError(error)
+        }
+        refreshUI()
+    }
+
     @objc private func configureVPNKeepalive() {
         guard let result = vpnKeepaliveDialog() else { return }
         settings.vpnKeepaliveEnabled = result.enabled
         settings.vpnKeepaliveURL = result.url
         settings.vpnKeepaliveIntervalSeconds = result.intervalSeconds
         settings.vpnKeepaliveTimeoutSeconds = result.timeoutSeconds
+        settings.vpnKeepaliveFailureIndicatorEnabled = result.failureIndicatorEnabled
         commitVPNKeepaliveSettings()
     }
 
@@ -1012,6 +1063,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menuVPNKeepaliveParentItem?.title = "Google VPN Keepalive: \(status.displayName)"
         menuVPNKeepaliveStatusItem?.title = "Status: \(status.detail)"
         menuVPNKeepaliveCheckButton?.isEnabled = settings.vpnKeepaliveEnabled
+        menuVPNKeepaliveFailureIndicatorItem?.state = settings.vpnKeepaliveFailureIndicatorEnabled ? .on : .off
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -1084,6 +1136,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let url = NSTextField(string: settings.vpnKeepaliveURL)
         let interval = NSTextField(string: "\(settings.vpnKeepaliveIntervalSeconds)")
         let timeout = NSTextField(string: "\(settings.vpnKeepaliveTimeoutSeconds)")
+        let failureIndicator = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+        failureIndicator.state = settings.vpnKeepaliveFailureIndicatorEnabled ? .on : .off
 
         let grid = NSGridView()
         grid.rowSpacing = 8
@@ -1092,7 +1146,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         grid.addRow(with: [label("Target URL"), url])
         grid.addRow(with: [label("Interval Seconds"), interval])
         grid.addRow(with: [label("Timeout Seconds"), timeout])
-        grid.frame = NSRect(x: 0, y: 0, width: 460, height: 128)
+        grid.addRow(with: [label("Menu Bar Failure Dot"), failureIndicator])
+        grid.frame = NSRect(x: 0, y: 0, width: 460, height: 158)
         url.frame.size.width = 320
         interval.frame.size.width = 320
         timeout.frame.size.width = 320
@@ -1121,7 +1176,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             enabled: enabled.state == .on,
             url: targetURL,
             intervalSeconds: intervalSeconds,
-            timeoutSeconds: timeoutSeconds
+            timeoutSeconds: timeoutSeconds,
+            failureIndicatorEnabled: failureIndicator.state == .on
         )
     }
 
@@ -1213,6 +1269,13 @@ private struct VPNKeepaliveFormResult {
     var url: String
     var intervalSeconds: Int
     var timeoutSeconds: Int
+    var failureIndicatorEnabled: Bool
+}
+
+private final class StatusFailureDotView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
 }
 
 private enum AppError: LocalizedError {

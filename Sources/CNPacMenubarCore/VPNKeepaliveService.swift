@@ -101,6 +101,13 @@ public struct VPNKeepaliveStatus: Equatable, Sendable {
         return "Waiting"
     }
 
+    public var hasFailedLastResult: Bool {
+        guard isEnabled, let lastResult else {
+            return false
+        }
+        return !lastResult.isSuccess
+    }
+
     public var detail: String {
         guard isEnabled else {
             return "Disabled"
