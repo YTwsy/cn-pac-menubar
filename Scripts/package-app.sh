@@ -6,8 +6,10 @@ APP_DIR="$ROOT_DIR/.build/CNPacMenubar.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 FRAMEWORKS_DIR="$CONTENTS_DIR/Frameworks"
+RESOURCES_DIR="$CONTENTS_DIR/Resources"
 DIRECT_DIR="$ROOT_DIR/.build/direct"
 VERSION_FILE="$ROOT_DIR/VERSION"
+SOURCE_RESOURCES_DIR="$ROOT_DIR/Resources"
 APP_VERSION="${APP_VERSION:-$(tr -d '[:space:]' < "$VERSION_FILE")}"
 APP_BUILD_NUMBER="${APP_BUILD_NUMBER:-1}"
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$ROOT_DIR/.build/ModuleCache}"
@@ -65,10 +67,17 @@ else
 fi
 
 rm -rf "$APP_DIR"
-mkdir -p "$MACOS_DIR" "$FRAMEWORKS_DIR"
+mkdir -p "$MACOS_DIR" "$FRAMEWORKS_DIR" "$RESOURCES_DIR"
 cp "$BUILT_EXECUTABLE" "$MACOS_DIR/CNPacMenubar"
 if [[ -n "$BUILT_CORE_DYLIB" ]]; then
   cp "$BUILT_CORE_DYLIB" "$FRAMEWORKS_DIR/libCNPacMenubarCore.dylib"
+fi
+if [[ -f "$SOURCE_RESOURCES_DIR/AppIcon.icns" ]]; then
+  cp "$SOURCE_RESOURCES_DIR/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
+fi
+if [[ -d "$SOURCE_RESOURCES_DIR/StatusBar" ]]; then
+  mkdir -p "$RESOURCES_DIR/StatusBar"
+  cp "$SOURCE_RESOURCES_DIR/StatusBar/"*.png "$RESOURCES_DIR/StatusBar/"
 fi
 
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
@@ -80,6 +89,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>CN PAC Menubar</string>
   <key>CFBundleIdentifier</key><string>local.cn-pac-menubar</string>
   <key>CFBundleExecutable</key><string>CNPacMenubar</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleShortVersionString</key><string>${APP_VERSION}</string>

@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private weak var menuVPNKeepaliveStatusItem: NSMenuItem?
     private weak var menuVPNKeepaliveCheckButton: NSButton?
     private weak var menuVPNKeepaliveFailureIndicatorItem: NSMenuItem?
-    private var statusFailureDotView: NSView?
+    private let statusBarIconProvider = StatusBarIconProvider()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -57,13 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         keepaliveService.apply(settings: settings)
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            let image = NSImage(systemSymbolName: "globe", accessibilityDescription: "CN PAC")
-                ?? NSImage(systemSymbolName: "antenna.radiowaves.left.and.right", accessibilityDescription: "CN PAC")
-            image?.isTemplate = true
-            button.image = image
-            button.imagePosition = image == nil ? .noImage : .imageLeading
+            button.imagePosition = .imageOnly
         }
         refreshUI()
         showMainWindow()
@@ -115,42 +111,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func updateStatusItem() {
         guard let button = statusItem?.button else { return }
-        button.title = "PAC"
+        statusItem.length = NSStatusItem.squareLength
+        button.title = ""
         button.toolTip = "CN PAC Menubar"
-        updateStatusFailureDot(on: button)
+        button.image = statusBarIconProvider.image(
+            for: currentStatusBarIconState,
+            appearance: button.effectiveAppearance
+        ) ?? fallbackStatusBarImage()
+        button.imagePosition = .imageOnly
     }
 
-    private var shouldShowKeepaliveFailureIndicator: Bool {
-        settings.vpnKeepaliveFailureIndicatorEnabled && keepaliveService.status.hasFailedLastResult
+    private var currentStatusBarIconState: StatusBarIconProvider.State {
+        let status = keepaliveService.status
+        guard status.isEnabled, let lastResult = status.lastResult else {
+            return .normal
+        }
+        if lastResult.isSuccess {
+            return .healthy
+        }
+        return settings.vpnKeepaliveFailureIndicatorEnabled ? .failure : .normal
     }
 
-    private func updateStatusFailureDot(on button: NSStatusBarButton) {
-        guard shouldShowKeepaliveFailureIndicator else {
-            statusFailureDotView?.removeFromSuperview()
-            statusFailureDotView = nil
-            return
-        }
-
-        if let statusFailureDotView {
-            if statusFailureDotView.superview === button {
-                return
-            }
-            statusFailureDotView.removeFromSuperview()
-        }
-
-        let dot = StatusFailureDotView()
-        dot.wantsLayer = true
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        dot.layer?.backgroundColor = NSColor.systemRed.cgColor
-        dot.layer?.cornerRadius = 3.5
-        button.addSubview(dot)
-        NSLayoutConstraint.activate([
-            dot.widthAnchor.constraint(equalToConstant: 7),
-            dot.heightAnchor.constraint(equalToConstant: 7),
-            dot.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 15),
-            dot.bottomAnchor.constraint(equalTo: button.bottomAnchor, constant: -3)
-        ])
-        statusFailureDotView = dot
+    private func fallbackStatusBarImage() -> NSImage? {
+        let image = NSImage(systemSymbolName: "point.3.connected.trianglepath.dotted", accessibilityDescription: "CN PAC")
+            ?? NSImage(systemSymbolName: "globe", accessibilityDescription: "CN PAC")
+            ?? NSImage(systemSymbolName: "antenna.radiowaves.left.and.right", accessibilityDescription: "CN PAC")
+        image?.isTemplate = true
+        image?.size = NSSize(width: 18, height: 18)
+        return image
     }
 
     private func rebuildMenu() {
@@ -1272,9 +1260,48 @@ private struct VPNKeepaliveFormResult {
     var failureIndicatorEnabled: Bool
 }
 
-private final class StatusFailureDotView: NSView {
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
+private final class StatusBarIconProvider {
+    enum State: String {
+        case normal
+        case healthy
+        case failure
+    }
+
+    private var cache: [String: NSImage] = [:]
+
+    func image(for state: State, appearance: NSAppearance) -> NSImage? {
+        let tone = appearance.cnPacUsesDarkStatusIcon ? "dark" : "light"
+        let resourceName = "StatusBarC-\(state.rawValue)-\(tone)"
+        if let cached = cache[resourceName] {
+            return cached
+        }
+        guard let url = Bundle.main.url(
+            forResource: resourceName,
+            withExtension: "png",
+            subdirectory: "StatusBar"
+        ), let image = NSImage(contentsOf: url) else {
+            return nil
+        }
+        image.isTemplate = false
+        image.size = NSSize(width: 18, height: 18)
+        cache[resourceName] = image
+        return image
+    }
+}
+
+private extension NSAppearance {
+    var cnPacUsesDarkStatusIcon: Bool {
+        let matched = bestMatch(from: [
+            .aqua,
+            .darkAqua,
+            .vibrantLight,
+            .vibrantDark,
+            .accessibilityHighContrastAqua,
+            .accessibilityHighContrastDarkAqua
+        ])
+        return matched == .darkAqua
+            || matched == .vibrantDark
+            || matched == .accessibilityHighContrastDarkAqua
     }
 }
 
