@@ -1,19 +1,39 @@
-# CN PAC Menubar
+<div align="center">
+  <img src="Resources/AppIcon.iconset/icon_128x128.png" width="96" height="96" alt="CN PAC Menubar App Icon">
+  <h1>CN PAC Menubar</h1>
+  <p><strong>从菜单栏托管 PAC、应用系统自动代理，并把代理配置快速分享给本机应用和局域网设备。</strong></p>
+  <p>
+    <a href="https://github.com/YTwsy/cn-pac-menubar/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/YTwsy/cn-pac-menubar?style=flat-square"></a>
+    <img alt="macOS 13+" src="https://img.shields.io/badge/macOS-13%2B-000000?style=flat-square&amp;logo=apple">
+    <img alt="Swift 5" src="https://img.shields.io/badge/Swift-5-F05138?style=flat-square&amp;logo=swift&amp;logoColor=white">
+    <img alt="Menu bar PAC server" src="https://img.shields.io/badge/Menu%20bar-PAC%20server-2ea44f?style=flat-square">
+  </p>
+  <p>
+    <strong>中文</strong> · <a href="README.en.md">English</a>
+  </p>
+  <p>
+    <a href="https://github.com/YTwsy/cn-pac-menubar/releases/latest">下载</a> ·
+    <a href="#构建">构建</a> ·
+    <a href="docs/RELEASE.zh-CN.md">发布流程</a> ·
+    <a href="#局域网设备">局域网设备</a> ·
+    <a href="#google-vpn-keepalive">Google VPN Keepalive</a>
+  </p>
+  <p>
+    <img src="Design/Product/cn-pac-menubar-main-window.png" width="38%" alt="CN PAC Menubar 主窗口">
+    <img src="Design/Product/cn-pac-menubar-menu.png" width="54%" alt="CN PAC Menubar 菜单栏菜单">
+  </p>
+</div>
 
-[中文说明](README.zh-CN.md)
+## 功能
 
-macOS 13+ status-bar utility for serving PAC files, applying macOS automatic proxy configuration, and launching selected apps with `HTTP_PROXY`/`HTTPS_PROXY` environment variables.
+- 从菜单栏选择并托管 PAC 文件。
+- 将 PAC 内的代理指令改写为当前配置的 SOCKS5/HTTP 代理端点。
+- 一键应用 macOS 自动代理配置，不需要手动进系统网络设置。
+- 复制局域网 PAC URL，方便同一网络里的手机、平板或其他电脑使用。
+- 为单个应用生成代理启动器，覆盖环境变量、Chromium/Electron 参数和 Java 参数等常见路径。
+- 通过 PAC 解析出的代理路径执行严格的 Google VPN Keepalive 探测。
 
-## Features
-
-- Serve a selected PAC file from a local menu-bar app.
-- Rewrite proxy directives to the configured SOCKS5/HTTP endpoints.
-- Apply macOS automatic proxy settings without changing the rest of the network stack manually.
-- Copy a LAN PAC URL for phones, tablets, and other computers on the same network.
-- Generate per-app proxy launchers for apps that honor environment variables or Chromium/Java proxy flags.
-- Run a strict Google VPN keepalive probe through the PAC-resolved proxy path.
-
-## Build
+## 构建
 
 ```sh
 swift test
@@ -21,68 +41,68 @@ swift build -c release
 Scripts/package-app.sh
 ```
 
-The packaged app is written to `.build/CNPacMenubar.app`.
+打包后的应用会写入 `.build/CNPacMenubar.app`。
 
-`Scripts/package-app.sh` first tries SwiftPM. If the local Command Line Tools installation cannot satisfy SwiftPM's macOS platform lookup, the script falls back to a direct `swiftc` build with the installed macOS SDK.
+`Scripts/package-app.sh` 会先尝试 SwiftPM 构建。如果本机 Command Line Tools 无法满足 SwiftPM 的 macOS platform lookup，脚本会退回到直接使用已安装 macOS SDK 的 `swiftc` 构建路径。
 
-The bundle version comes from `VERSION` by default. Release builds can override it:
+应用版本默认来自 `VERSION`。发布构建也可以用环境变量覆盖：
 
 ```sh
 APP_VERSION=1.0 APP_BUILD_NUMBER=1 Scripts/package-app.sh
 ```
 
-## Install Locally
+## 本地安装
 
 ```sh
 Scripts/package-app.sh
 cp -R .build/CNPacMenubar.app ~/Applications/
 ```
 
-## Runtime Data
+## 运行数据
 
-Settings are stored in:
+设置会保存到：
 
 ```text
 ~/Library/Application Support/cn-pac-menubar/settings.json
 ~/Library/Application Support/cn-pac-menubar/launchers.json
 ```
 
-Generated proxy launchers read `settings.json` every time they start, so updating the HTTP proxy host or port in CN PAC Menubar changes future launcher sessions without rebuilding the launcher.
+生成的代理启动器每次启动都会重新读取 `settings.json`，所以在 CN PAC Menubar 里更新 HTTP 代理主机或端口后，后续启动器会自动使用新配置，不需要重新生成。
 
-## PAC Proxy Fallback
+## PAC 代理兜底
 
-Proxy rules fail closed by default: generated PAC proxy chains omit a final `DIRECT`, so a host that should use the proxy will fail if all configured proxies are unavailable instead of silently connecting directly.
+代理规则默认 fail closed：生成的 PAC 代理链不会追加最终的 `DIRECT`，因此应该走代理的主机在所有代理不可用时会失败，而不是静默直连。
 
-Use **Proxy > Allow DIRECT Fallback** if you explicitly want the old behavior where PAC clients try `DIRECT` after the SOCKS5/HTTP proxy endpoints fail. Built-in direct rules for private IPs and direct-domain matches still return `DIRECT` either way.
+如果确实想恢复旧行为，可以在 **Proxy > Allow DIRECT Fallback** 中显式开启。内置的私有 IP 和直连域名规则仍然会返回 `DIRECT`，不受该开关影响。
 
 ## Google VPN Keepalive
 
-The menu includes **Google VPN Keepalive** for sending a strict scheduled PAC proxy probe while the app is running. It evaluates the selected PAC for the target URL, uses the first proxy directive explicitly, and treats `DIRECT` as a failed keepalive path. Enable it from the menu or main window, then use **Keepalive Settings...** to adjust:
+菜单里包含 **Google VPN Keepalive**，用于在应用运行时按计划发送严格的 PAC 代理探测。它会先用当前 PAC 解析目标 URL，明确使用第一个代理指令，并把 `DIRECT` 视为 keepalive 路径失败。可以从菜单或主窗口启用，再通过 **Keepalive Settings...** 调整：
 
-- Target URL, defaulting to `https://www.gstatic.com/generate_204`.
-- Interval in seconds, from 30 seconds to 24 hours.
-- Timeout in seconds, from 1 to 120 seconds.
+- 目标 URL，默认为 `https://www.gstatic.com/generate_204`。
+- 间隔秒数，范围是 30 秒到 24 小时。
+- 超时秒数，范围是 1 到 120 秒。
 
-The menu and main window show the latest result and the next scheduled request.
+菜单和主窗口会显示最近一次结果以及下一次计划请求。
 
-## LAN Devices
+## 局域网设备
 
-The app keeps the Mac's own automatic proxy URL on loopback, for example `http://127.0.0.1:8118/proxy.pac`, and also exposes a LAN PAC URL in the menu bar such as `http://192.168.1.103:8118/proxy.pac`. Use **Copy LAN PAC URL** for phones, tablets, or other computers on the same network.
+应用会把本机 macOS 自动代理 URL 保持在 loopback，例如 `http://127.0.0.1:8118/proxy.pac`，同时在菜单里暴露局域网 PAC URL，例如 `http://192.168.1.103:8118/proxy.pac`。手机、平板或其他电脑可以使用 **Copy LAN PAC URL** 复制这个地址。
 
-For another device to use the PAC successfully, macOS may need to allow incoming connections for CN PAC Menubar, and the proxy endpoint written inside the PAC must be reachable from that device. If the proxy runs on this Mac, set **Proxy Host** to this Mac's LAN IP and make sure the upstream proxy app allows LAN connections.
+其他设备要成功使用 PAC，macOS 可能需要允许 CN PAC Menubar 接收入站连接，而且 PAC 里写入的代理端点必须能被该设备访问。如果代理运行在这台 Mac 上，应把 **Proxy Host** 设置为这台 Mac 的局域网 IP，并确认上游代理应用允许局域网连接。
 
-## Launcher Compatibility
+## 启动器兼容性
 
-Launchers now choose a profile for the target app:
+启动器会为目标应用选择兼容配置：
 
-- Environment: exports common proxy variables such as `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `FTP_PROXY`, `grpc_proxy`, and `NO_PROXY`.
-- Chromium/Electron: adds Chromium proxy flags like `--proxy-server` and `--proxy-bypass-list` in addition to proxy variables.
-- Java: adds `JAVA_TOOL_OPTIONS` JVM proxy properties in addition to proxy variables.
-- System PAC preferred: marks Apple/system apps that may ignore launcher variables and are better handled by macOS automatic proxy configuration.
+- Environment：导出常见代理变量，例如 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`FTP_PROXY`、`grpc_proxy` 和 `NO_PROXY`。
+- Chromium/Electron：除了代理变量，还会加入 `--proxy-server` 和 `--proxy-bypass-list` 等 Chromium 代理参数。
+- Java：除了代理变量，还会加入 `JAVA_TOOL_OPTIONS` JVM 代理属性。
+- System PAC preferred：标记可能忽略启动器变量的 Apple/系统应用，这类应用更适合通过 macOS 自动代理配置处理。
 
-## Release
+## 发布
 
-Releases are driven by version tags:
+发布通过版本标签驱动：
 
 ```sh
 VERSION="$(cat VERSION)"
@@ -91,4 +111,4 @@ git push origin main
 git push origin "v${VERSION}"
 ```
 
-The `Release` GitHub Actions workflow builds the app, creates `CNPacMenubar-vVERSION-macos.zip`, and publishes a GitHub Release for the tag. See [docs/RELEASE.md](docs/RELEASE.md) for the full process.
+`Release` GitHub Actions workflow 会构建应用、生成 `CNPacMenubar-vVERSION-macos.zip`，并为标签创建 GitHub Release。完整流程见 [docs/RELEASE.zh-CN.md](docs/RELEASE.zh-CN.md)。

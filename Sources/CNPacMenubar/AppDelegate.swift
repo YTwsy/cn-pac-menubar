@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     fileprivate static let statusItemLength: CGFloat = 22
     fileprivate static let statusIconPointSize: CGFloat = 17
+    private static let infoRowTitleWidth: CGFloat = 104
+    private static let controlRowTitleWidth: CGFloat = 146
 
     private var statusItem: NSStatusItem!
     private var statusDotLayer: CALayer?
@@ -924,12 +926,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.textColor = .secondaryLabelColor
         titleLabel.alignment = .right
-        titleLabel.widthAnchor.constraint(equalToConstant: 78).isActive = true
+        titleLabel.widthAnchor.constraint(equalToConstant: Self.infoRowTitleWidth).isActive = true
+        titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let valueLabel = NSTextField(labelWithString: value)
         valueLabel.isSelectable = true
         valueLabel.lineBreakMode = .byTruncatingMiddle
         valueLabel.maximumNumberOfLines = 1
+        valueLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         row.addArrangedSubview(titleLabel)
         row.addArrangedSubview(valueLabel)
@@ -945,7 +949,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.textColor = .secondaryLabelColor
         titleLabel.alignment = .right
-        titleLabel.widthAnchor.constraint(equalToConstant: 96).isActive = true
+        titleLabel.widthAnchor.constraint(equalToConstant: Self.controlRowTitleWidth).isActive = true
+        titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         row.addArrangedSubview(titleLabel)
         row.addArrangedSubview(control)

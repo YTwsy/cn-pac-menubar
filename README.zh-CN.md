@@ -1,8 +1,28 @@
-# CN PAC Menubar
-
-[English](README.md)
-
-CN PAC Menubar 是一个 macOS 13+ 菜单栏工具，用来托管 PAC 文件、应用 macOS 自动代理配置，并为指定应用生成带代理环境变量或启动参数的启动器。
+<div align="center">
+  <img src="Resources/AppIcon.iconset/icon_128x128.png" width="96" height="96" alt="CN PAC Menubar App Icon">
+  <h1>CN PAC Menubar</h1>
+  <p><strong>从菜单栏托管 PAC、应用系统自动代理，并把代理配置快速分享给本机应用和局域网设备。</strong></p>
+  <p>
+    <a href="https://github.com/YTwsy/cn-pac-menubar/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/YTwsy/cn-pac-menubar?style=flat-square"></a>
+    <img alt="macOS 13+" src="https://img.shields.io/badge/macOS-13%2B-000000?style=flat-square&amp;logo=apple">
+    <img alt="Swift 5" src="https://img.shields.io/badge/Swift-5-F05138?style=flat-square&amp;logo=swift&amp;logoColor=white">
+    <img alt="Menu bar PAC server" src="https://img.shields.io/badge/Menu%20bar-PAC%20server-2ea44f?style=flat-square">
+  </p>
+  <p>
+    <strong>中文</strong> · <a href="README.en.md">English</a>
+  </p>
+  <p>
+    <a href="https://github.com/YTwsy/cn-pac-menubar/releases/latest">下载</a> ·
+    <a href="#构建">构建</a> ·
+    <a href="docs/RELEASE.zh-CN.md">发布流程</a> ·
+    <a href="#局域网设备">局域网设备</a> ·
+    <a href="#google-vpn-keepalive">Google VPN Keepalive</a>
+  </p>
+  <p>
+    <img src="Design/Product/cn-pac-menubar-main-window.png" width="38%" alt="CN PAC Menubar 主窗口">
+    <img src="Design/Product/cn-pac-menubar-menu.png" width="54%" alt="CN PAC Menubar 菜单栏菜单">
+  </p>
+</div>
 
 ## 功能
 
