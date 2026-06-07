@@ -1,10 +1,15 @@
 import AppKit
 import CNPacMenubarCore
+import QuartzCore
 import ServiceManagement
 import UniformTypeIdentifiers
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
+    fileprivate static let statusItemLength: CGFloat = 22
+    fileprivate static let statusIconPointSize: CGFloat = 17
+
     private var statusItem: NSStatusItem!
+    private var statusDotLayer: CALayer?
     private var mainWindow: NSWindow?
     private var store: SettingsStore!
     private var settings = CNPacSettings()
@@ -57,9 +62,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         keepaliveService.apply(settings: settings)
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: Self.statusItemLength)
         if let button = statusItem.button {
             button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
+            button.wantsLayer = true
+            button.layer?.masksToBounds = false
         }
         refreshUI()
         showMainWindow()
@@ -111,14 +119,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func updateStatusItem() {
         guard let button = statusItem?.button else { return }
-        statusItem.length = NSStatusItem.squareLength
+        statusItem.length = Self.statusItemLength
         button.title = ""
         button.toolTip = "CN PAC Menubar"
-        button.image = statusBarIconProvider.image(
-            for: currentStatusBarIconState,
-            appearance: button.effectiveAppearance
-        ) ?? fallbackStatusBarImage()
+        button.image = statusBarIconProvider.templateImage() ?? fallbackStatusBarImage()
         button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyDown
+        button.wantsLayer = true
+        button.layer?.masksToBounds = false
+        updateStatusDotLayer(on: button, state: currentStatusBarIconState)
+        button.needsDisplay = true
+    }
+
+    private func updateStatusDotLayer(on button: NSStatusBarButton, state: StatusBarIconProvider.State) {
+        guard let rootLayer = button.layer else { return }
+        let layer = statusDotLayer ?? {
+            let layer = CALayer()
+            layer.contentsGravity = .resizeAspect
+            layer.magnificationFilter = .linear
+            layer.minificationFilter = .linear
+            rootLayer.addSublayer(layer)
+            statusDotLayer = layer
+            return layer
+        }()
+
+        guard let overlayImage = statusBarIconProvider.overlayImage(for: state),
+              let cgImage = overlayImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else {
+            layer.isHidden = true
+            layer.contents = nil
+            return
+        }
+
+        layer.isHidden = false
+        layer.contentsScale = button.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        layer.contents = cgImage
+        let iconSize = Self.statusIconPointSize
+        layer.frame = CGRect(
+            x: (button.bounds.width - iconSize) / 2,
+            y: (button.bounds.height - iconSize) / 2,
+            width: iconSize,
+            height: iconSize
+        )
     }
 
     private var currentStatusBarIconState: StatusBarIconProvider.State {
@@ -137,7 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             ?? NSImage(systemSymbolName: "globe", accessibilityDescription: "CN PAC")
             ?? NSImage(systemSymbolName: "antenna.radiowaves.left.and.right", accessibilityDescription: "CN PAC")
         image?.isTemplate = true
-        image?.size = NSSize(width: 18, height: 18)
+        image?.size = NSSize(width: Self.statusIconPointSize, height: Self.statusIconPointSize)
         return image
     }
 
@@ -1267,14 +1309,37 @@ private final class StatusBarIconProvider {
         case failure
     }
 
-    private var cache: [String: NSImage] = [:]
+    private static let iconSize = NSSize(width: AppDelegate.statusIconPointSize, height: AppDelegate.statusIconPointSize)
 
-    func image(for state: State, appearance: NSAppearance) -> NSImage? {
-        let tone = appearance.cnPacUsesDarkStatusIcon ? "dark" : "light"
-        let resourceName = "StatusBarC-\(state.rawValue)-\(tone)"
-        if let cached = cache[resourceName] {
+    private var templateCache: NSImage?
+    private var overlayCache: [State: NSImage] = [:]
+
+    func templateImage() -> NSImage? {
+        if let templateCache {
+            return templateCache
+        }
+        guard let image = loadImage(named: "StatusBarC-normal-light") else {
+            return nil
+        }
+        image.isTemplate = true
+        templateCache = image
+        return image
+    }
+
+    func overlayImage(for state: State) -> NSImage? {
+        guard state != .normal else { return nil }
+        if let cached = overlayCache[state] {
             return cached
         }
+        guard let image = loadImage(named: "StatusBarC-\(state.rawValue)-overlay") else {
+            return nil
+        }
+        image.isTemplate = false
+        overlayCache[state] = image
+        return image
+    }
+
+    private func loadImage(named resourceName: String) -> NSImage? {
         guard let url = Bundle.main.url(
             forResource: resourceName,
             withExtension: "png",
@@ -1282,26 +1347,8 @@ private final class StatusBarIconProvider {
         ), let image = NSImage(contentsOf: url) else {
             return nil
         }
-        image.isTemplate = false
-        image.size = NSSize(width: 18, height: 18)
-        cache[resourceName] = image
+        image.size = Self.iconSize
         return image
-    }
-}
-
-private extension NSAppearance {
-    var cnPacUsesDarkStatusIcon: Bool {
-        let matched = bestMatch(from: [
-            .aqua,
-            .darkAqua,
-            .vibrantLight,
-            .vibrantDark,
-            .accessibilityHighContrastAqua,
-            .accessibilityHighContrastDarkAqua
-        ])
-        return matched == .darkAqua
-            || matched == .vibrantDark
-            || matched == .accessibilityHighContrastDarkAqua
     }
 }
 
