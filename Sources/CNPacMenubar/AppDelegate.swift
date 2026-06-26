@@ -398,6 +398,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             try store.saveSettings(settings)
             try ensurePACServerRunning()
             try refreshPAC(applySystemProxy: true)
+            restartKeepaliveIfEnabled()
             showInfo("PAC selected", "Now serving \(URL(fileURLWithPath: path).lastPathComponent).")
         } catch {
             showError(error)
@@ -485,6 +486,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc private func refreshPACFromMenu() {
         do {
             try refreshPAC(applySystemProxy: true)
+            restartKeepaliveIfEnabled()
             showInfo("PAC refreshed", settings.pacURL.absoluteString)
         } catch {
             showError(error)
@@ -712,6 +714,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 try pacServer.start(port: settings.pacServerPort)
             }
             try saveOrRefreshPAC(applySystemProxy: serverWasActive)
+            restartKeepaliveIfEnabled()
         } catch {
             showError(error)
         }
@@ -1017,6 +1020,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func commitProxySettings() {
         do {
             try saveOrRefreshPAC(applySystemProxy: pacServer.state.isActive)
+            restartKeepaliveIfEnabled()
         } catch {
             showError(error)
         }
@@ -1031,6 +1035,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             showError(error)
         }
         refreshUI()
+    }
+
+    private func restartKeepaliveIfEnabled() {
+        guard settings.vpnKeepaliveEnabled else {
+            return
+        }
+        keepaliveService.apply(settings: settings)
     }
 
     private func saveOrRefreshPAC(applySystemProxy: Bool) throws {

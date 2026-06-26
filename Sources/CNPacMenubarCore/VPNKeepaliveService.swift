@@ -8,6 +8,7 @@ public struct VPNKeepaliveConfiguration: Equatable, Sendable {
 
     public var url: URL
     public var pacPath: String?
+    public var settings: CNPacSettings
     public var intervalSeconds: Int
     public var timeoutSeconds: Int
 
@@ -18,6 +19,7 @@ public struct VPNKeepaliveConfiguration: Equatable, Sendable {
         }
         self.url = url
         self.pacPath = settings.pacPath
+        self.settings = settings
         self.intervalSeconds = Self.normalizedIntervalSeconds(settings.vpnKeepaliveIntervalSeconds)
         self.timeoutSeconds = Self.normalizedTimeoutSeconds(settings.vpnKeepaliveTimeoutSeconds)
     }
@@ -234,7 +236,7 @@ public final class VPNKeepaliveService: @unchecked Sendable {
 
         let proxyEndpoint: PACProxyEndpoint
         do {
-            proxyEndpoint = try PACProxyResolver.firstProxy(for: configuration.url, pacPath: configuration.pacPath)
+            proxyEndpoint = try PACProxyResolver.firstProxy(for: configuration.url, settings: configuration.settings)
         } catch {
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             failActiveRequest(

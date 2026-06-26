@@ -172,6 +172,36 @@ final class CNPacMenubarCoreTests: XCTestCase {
         }
     }
 
+    func testPACProxyResolverUsesCurrentSettingsForKeepaliveProxyEndpoint() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let pacURL = root.appendingPathComponent("proxy.pac")
+        try """
+        function FindProxyForURL(url, host) {
+          if (dnsDomainIs(host, "gstatic.com")) {
+            return "SOCKS5 192.168.1.103:1080; PROXY 192.168.1.103:8080; DIRECT;";
+          }
+          return "DIRECT";
+        }
+        """.write(to: pacURL, atomically: true, encoding: .utf8)
+
+        let googleURL = try XCTUnwrap(URL(string: "https://www.gstatic.com/generate_204"))
+        let rawEndpoint = try PACProxyResolver.firstProxy(for: googleURL, pacPath: pacURL.path)
+        XCTAssertEqual(rawEndpoint, PACProxyEndpoint(kind: .socks5, host: "192.168.1.103", port: 1080))
+
+        let settings = CNPacSettings(
+            pacPath: pacURL.path,
+            proxyHost: "192.168.1.100",
+            socks5Port: 1080,
+            httpPort: 8080,
+            proxyMode: .socks5AndHTTP,
+            vpnKeepaliveEnabled: true
+        )
+        let endpoint = try PACProxyResolver.firstProxy(for: googleURL, settings: settings)
+        XCTAssertEqual(endpoint, PACProxyEndpoint(kind: .socks5, host: "192.168.1.100", port: 1080))
+    }
+
     func testVPNKeepaliveStatusDetailShowsClockTimesWithoutStaleCountdown() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current

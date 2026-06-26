@@ -69,6 +69,17 @@ struct PACProxyEndpoint: Equatable, Sendable {
 }
 
 enum PACProxyResolver {
+    static func firstProxy(for targetURL: URL, settings: CNPacSettings) throws -> PACProxyEndpoint {
+        guard let pacPath = settings.pacPath,
+              !pacPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw PACProxyResolverError.missingPACPath
+        }
+
+        let pac = try rewrittenPAC(at: pacPath, settings: settings)
+        let proxyResult = try evaluate(pac: pac, targetURL: targetURL)
+        return try firstProxy(from: proxyResult)
+    }
+
     static func firstProxy(for targetURL: URL, pacPath: String?) throws -> PACProxyEndpoint {
         guard let pacPath, !pacPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PACProxyResolverError.missingPACPath
@@ -83,6 +94,16 @@ enum PACProxyResolver {
 
         let proxyResult = try evaluate(pac: pac, targetURL: targetURL)
         return try firstProxy(from: proxyResult)
+    }
+
+    private static func rewrittenPAC(at pacPath: String, settings: CNPacSettings) throws -> String {
+        let pac: String
+        do {
+            pac = try String(contentsOfFile: pacPath, encoding: .utf8)
+        } catch {
+            throw PACProxyResolverError.unreadablePAC(pacPath)
+        }
+        return PACRewriter.rewrite(pac, settings: settings).content
     }
 
     static func evaluate(pac: String, targetURL: URL) throws -> String {
