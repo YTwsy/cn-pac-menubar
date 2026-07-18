@@ -79,6 +79,107 @@ final class CNPacMenubarCoreTests: XCTestCase {
         XCTAssertTrue(settings.terminalProxyCommand.contains("export ALL_PROXY='http://192.168.1.103:8080'"))
     }
 
+    func testProxyLaunchConfigurationUsesConfiguredProxyMode() {
+        var settings = CNPacSettings(
+            proxyHost: "192.168.1.100",
+            socks5Port: 1080,
+            httpPort: 8080,
+            proxyMode: .socks5AndHTTP,
+            noProxy: "127.0.0.1,localhost"
+        )
+
+        var configuration = ProxyLaunchConfiguration(settings: settings, profile: .environment)
+        XCTAssertEqual(configuration.environment["HTTP_PROXY"], "http://192.168.1.100:8080")
+        XCTAssertEqual(configuration.environment["HTTPS_PROXY"], "http://192.168.1.100:8080")
+        XCTAssertEqual(configuration.environment["ALL_PROXY"], "socks5h://192.168.1.100:1080")
+        XCTAssertEqual(configuration.environment["NO_PROXY"], "127.0.0.1,localhost")
+        XCTAssertTrue(configuration.arguments.isEmpty)
+
+        settings.proxyMode = .socks5
+        configuration = ProxyLaunchConfiguration(settings: settings, profile: .environment)
+        XCTAssertEqual(configuration.environment["HTTP_PROXY"], "socks5h://192.168.1.100:1080")
+        XCTAssertEqual(configuration.environment["ALL_PROXY"], "socks5h://192.168.1.100:1080")
+
+        settings.proxyMode = .http
+        configuration = ProxyLaunchConfiguration(settings: settings, profile: .environment)
+        XCTAssertEqual(configuration.environment["HTTP_PROXY"], "http://192.168.1.100:8080")
+        XCTAssertEqual(configuration.environment["ALL_PROXY"], "http://192.168.1.100:8080")
+    }
+
+    func testProxyLaunchConfigurationAddsChromiumArguments() {
+        let settings = CNPacSettings(
+            proxyHost: "192.168.1.100",
+            socks5Port: 1080,
+            httpPort: 8080,
+            proxyMode: .socks5AndHTTP,
+            noProxy: "127.0.0.1,localhost"
+        )
+
+        let configuration = ProxyLaunchConfiguration(settings: settings, profile: .chromium)
+
+        XCTAssertEqual(configuration.arguments, [
+            "--proxy-server=http://192.168.1.100:8080",
+            "--proxy-bypass-list=127.0.0.1;localhost"
+        ])
+    }
+
+    func testProxyLaunchConfigurationAddsJavaOptions() {
+        let settings = CNPacSettings(
+            proxyHost: "proxy.local",
+            socks5Port: 1081,
+            httpPort: 8081,
+            proxyMode: .http,
+            noProxy: "localhost, 127.0.0.1"
+        )
+
+        let configuration = ProxyLaunchConfiguration(
+            settings: settings,
+            profile: .java,
+            baseEnvironment: [
+                "JAVA_TOOL_OPTIONS": "-Xmx2g",
+                "PATH": "/usr/bin"
+            ]
+        )
+
+        let options = configuration.environment["JAVA_TOOL_OPTIONS"] ?? ""
+        XCTAssertEqual(configuration.environment["PATH"], "/usr/bin")
+        XCTAssertTrue(options.hasPrefix("-Xmx2g "))
+        XCTAssertTrue(options.contains("-Dhttp.proxyHost=proxy.local"))
+        XCTAssertTrue(options.contains("-Dhttp.proxyPort=8081"))
+        XCTAssertTrue(options.contains("-Dhttp.nonProxyHosts=localhost|127.0.0.1"))
+        XCTAssertTrue(configuration.arguments.isEmpty)
+    }
+
+    func testRememberProxyLaunchDeduplicatesSortsAndLimits() {
+        var settings = CNPacSettings()
+        for index in 0..<11 {
+            settings.rememberProxyLaunch(QuickLaunchRecord(
+                displayName: "App \(index)",
+                appPath: "/Applications/App\(index).app",
+                bundleIdentifier: "com.example.app\(index)",
+                launcherProfile: .environment,
+                lastLaunchedAt: Date(timeIntervalSince1970: TimeInterval(index))
+            ))
+        }
+
+        XCTAssertEqual(settings.recentProxyLaunches.count, 10)
+        XCTAssertEqual(settings.recentProxyLaunches.first?.appPath, "/Applications/App10.app")
+        XCTAssertFalse(settings.recentProxyLaunches.contains { $0.appPath == "/Applications/App0.app" })
+
+        settings.rememberProxyLaunch(QuickLaunchRecord(
+            displayName: "App Five",
+            appPath: "/Applications/App5.app",
+            bundleIdentifier: "com.example.app5",
+            launcherProfile: .chromium,
+            lastLaunchedAt: Date(timeIntervalSince1970: 100)
+        ))
+
+        XCTAssertEqual(settings.recentProxyLaunches.count, 10)
+        XCTAssertEqual(settings.recentProxyLaunches.first?.displayName, "App Five")
+        XCTAssertEqual(settings.recentProxyLaunches.first?.launcherProfile, .chromium)
+        XCTAssertEqual(settings.recentProxyLaunches.filter { $0.appPath == "/Applications/App5.app" }.count, 1)
+    }
+
     func testSettingsDecodeBackfillsVPNKeepaliveDefaults() throws {
         let data = """
         {
@@ -103,6 +204,7 @@ final class CNPacMenubarCoreTests: XCTestCase {
         XCTAssertEqual(settings.vpnKeepaliveIntervalSeconds, 300)
         XCTAssertEqual(settings.vpnKeepaliveTimeoutSeconds, 10)
         XCTAssertTrue(settings.vpnKeepaliveFailureIndicatorEnabled)
+        XCTAssertTrue(settings.recentProxyLaunches.isEmpty)
     }
 
     func testSettingsRoundTripsVPNKeepaliveFailureIndicatorToggle() throws {

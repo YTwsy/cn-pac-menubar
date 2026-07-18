@@ -55,6 +55,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
 
     public var pacPath: String?
     public var recentPACPaths: [String]
+    public var recentProxyLaunches: [QuickLaunchRecord]
     public var pacServerPort: Int
     public var proxyHost: String
     public var socks5Port: Int
@@ -73,6 +74,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
     public init(
         pacPath: String? = nil,
         recentPACPaths: [String] = [],
+        recentProxyLaunches: [QuickLaunchRecord] = [],
         pacServerPort: Int = 8118,
         proxyHost: String = "127.0.0.1",
         socks5Port: Int = 1080,
@@ -90,6 +92,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
     ) {
         self.pacPath = pacPath
         self.recentPACPaths = recentPACPaths
+        self.recentProxyLaunches = recentProxyLaunches
         self.pacServerPort = pacServerPort
         self.proxyHost = proxyHost
         self.socks5Port = socks5Port
@@ -109,6 +112,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case pacPath
         case recentPACPaths
+        case recentProxyLaunches
         case pacServerPort
         case proxyHost
         case socks5Port
@@ -131,6 +135,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         self.init(
             pacPath: try container.decodeIfPresent(String.self, forKey: .pacPath),
             recentPACPaths: try container.decodeIfPresent([String].self, forKey: .recentPACPaths) ?? defaults.recentPACPaths,
+            recentProxyLaunches: try container.decodeIfPresent([QuickLaunchRecord].self, forKey: .recentProxyLaunches) ?? defaults.recentProxyLaunches,
             pacServerPort: try container.decodeIfPresent(Int.self, forKey: .pacServerPort) ?? defaults.pacServerPort,
             proxyHost: try container.decodeIfPresent(String.self, forKey: .proxyHost) ?? defaults.proxyHost,
             socks5Port: try container.decodeIfPresent(Int.self, forKey: .socks5Port) ?? defaults.socks5Port,
@@ -152,6 +157,7 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(pacPath, forKey: .pacPath)
         try container.encode(recentPACPaths, forKey: .recentPACPaths)
+        try container.encode(recentProxyLaunches, forKey: .recentProxyLaunches)
         try container.encode(pacServerPort, forKey: .pacServerPort)
         try container.encode(proxyHost, forKey: .proxyHost)
         try container.encode(socks5Port, forKey: .socks5Port)
@@ -288,11 +294,53 @@ public struct CNPacSettings: Codable, Equatable, Sendable {
         }
     }
 
+    public mutating func rememberProxyLaunch(_ record: QuickLaunchRecord, limit: Int = 10) {
+        guard limit > 0 else {
+            recentProxyLaunches = []
+            return
+        }
+
+        recentProxyLaunches.removeAll { $0.appPath == record.appPath }
+        recentProxyLaunches.append(record)
+        recentProxyLaunches.sort {
+            if $0.lastLaunchedAt == $1.lastLaunchedAt {
+                return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            }
+            return $0.lastLaunchedAt > $1.lastLaunchedAt
+        }
+        if recentProxyLaunches.count > limit {
+            recentProxyLaunches = Array(recentProxyLaunches.prefix(limit))
+        }
+    }
+
     public mutating func bumpRefreshVersion() {
         refreshVersion += 1
         if refreshVersion > 999_999 {
             refreshVersion = 1
         }
+    }
+}
+
+public struct QuickLaunchRecord: Codable, Equatable, Sendable, Identifiable {
+    public var id: String { appPath }
+    public var displayName: String
+    public var appPath: String
+    public var bundleIdentifier: String?
+    public var launcherProfile: LauncherProfile
+    public var lastLaunchedAt: Date
+
+    public init(
+        displayName: String,
+        appPath: String,
+        bundleIdentifier: String?,
+        launcherProfile: LauncherProfile,
+        lastLaunchedAt: Date = Date()
+    ) {
+        self.displayName = displayName
+        self.appPath = appPath
+        self.bundleIdentifier = bundleIdentifier
+        self.launcherProfile = launcherProfile
+        self.lastLaunchedAt = lastLaunchedAt
     }
 }
 

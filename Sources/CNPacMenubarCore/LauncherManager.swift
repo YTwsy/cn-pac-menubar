@@ -94,6 +94,81 @@ public enum LauncherScriptBuilder {
     }
 }
 
+public struct ProxyLaunchConfiguration: Equatable, Sendable {
+    public var environment: [String: String]
+    public var arguments: [String]
+
+    public init(
+        settings: CNPacSettings,
+        profile: LauncherProfile,
+        baseEnvironment: [String: String] = [:]
+    ) {
+        let httpProxyURL = "http://\(settings.proxyHost):\(settings.httpPort)"
+        let socksProxyURL = "socks5h://\(settings.proxyHost):\(settings.socks5Port)"
+
+        let primaryProxy: String
+        let allProxy: String
+        let chromiumProxyURL: String
+        switch settings.proxyMode {
+        case .socks5:
+            primaryProxy = socksProxyURL
+            allProxy = socksProxyURL
+            chromiumProxyURL = "socks5://\(settings.proxyHost):\(settings.socks5Port)"
+        case .socks5AndHTTP:
+            primaryProxy = httpProxyURL
+            allProxy = socksProxyURL
+            chromiumProxyURL = httpProxyURL
+        case .http:
+            primaryProxy = httpProxyURL
+            allProxy = httpProxyURL
+            chromiumProxyURL = httpProxyURL
+        }
+
+        var environment = baseEnvironment
+        environment["HTTP_PROXY"] = primaryProxy
+        environment["HTTPS_PROXY"] = primaryProxy
+        environment["http_proxy"] = primaryProxy
+        environment["https_proxy"] = primaryProxy
+        environment["ALL_PROXY"] = allProxy
+        environment["all_proxy"] = allProxy
+        environment["FTP_PROXY"] = primaryProxy
+        environment["ftp_proxy"] = primaryProxy
+        environment["grpc_proxy"] = primaryProxy
+        environment["NO_PROXY"] = settings.noProxy
+        environment["no_proxy"] = settings.noProxy
+
+        var arguments: [String] = []
+        switch profile {
+        case .chromium:
+            let chromiumBypassList = settings.noProxy.replacingOccurrences(of: ",", with: ";")
+            arguments = [
+                "--proxy-server=\(chromiumProxyURL)",
+                "--proxy-bypass-list=\(chromiumBypassList)"
+            ]
+        case .java:
+            let javaNoProxy = settings.noProxy
+                .replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: ",", with: "|")
+            let javaProxyOptions: String
+            if settings.proxyMode == .socks5 {
+                javaProxyOptions = "-DsocksProxyHost=\(settings.proxyHost) -DsocksProxyPort=\(settings.socks5Port) -Dhttp.nonProxyHosts=\(javaNoProxy)"
+            } else {
+                javaProxyOptions = "-Dhttp.proxyHost=\(settings.proxyHost) -Dhttp.proxyPort=\(settings.httpPort) -Dhttps.proxyHost=\(settings.proxyHost) -Dhttps.proxyPort=\(settings.httpPort) -Dhttp.nonProxyHosts=\(javaNoProxy)"
+            }
+            if let existingOptions = environment["JAVA_TOOL_OPTIONS"], !existingOptions.isEmpty {
+                environment["JAVA_TOOL_OPTIONS"] = "\(existingOptions) \(javaProxyOptions)"
+            } else {
+                environment["JAVA_TOOL_OPTIONS"] = javaProxyOptions
+            }
+        case .environment, .systemProxyPreferred:
+            break
+        }
+
+        self.environment = environment
+        self.arguments = arguments
+    }
+}
+
 public final class LauncherManager: @unchecked Sendable {
     private let fileManager: FileManager
     private let store: SettingsStore
@@ -243,7 +318,7 @@ public final class LauncherManager: @unchecked Sendable {
         return executableURL
     }
 
-    private static func bundleIdentifier(forApp appURL: URL) throws -> String? {
+    public static func bundleIdentifier(forApp appURL: URL) throws -> String? {
         let infoURL = appURL.appendingPathComponent("Contents/Info.plist")
         guard let info = NSDictionary(contentsOf: infoURL) as? [String: Any] else {
             return nil

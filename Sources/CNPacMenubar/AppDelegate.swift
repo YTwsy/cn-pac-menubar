@@ -203,6 +203,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(.separator())
 
         menu.addItem(actionItem("Show Main Window", #selector(showMainWindow)))
+        menu.addItem(actionItem("Launch App with Proxy...", #selector(launchAppWithProxyFromMenu)))
+        menu.addItem(recentProxyLaunchesItem())
+        menu.addItem(.separator())
+
         menu.addItem(actionItem("Choose PAC...", #selector(choosePAC)))
         menu.addItem(recentPACsItem())
         menu.addItem(actionItem("Open PAC Folder", #selector(openPACFolder), enabled: settings.pacPath != nil))
@@ -246,6 +250,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 let title = URL(fileURLWithPath: path).lastPathComponent
                 let menuItem = actionItem(title, #selector(selectRecentPAC(_:)))
                 menuItem.representedObject = path
+                submenu.addItem(menuItem)
+            }
+        }
+        item.submenu = submenu
+        return item
+    }
+
+    private func recentProxyLaunchesItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Recent Proxy Launches", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        if settings.recentProxyLaunches.isEmpty {
+            addDisabled("No recent proxy launches", to: submenu)
+        } else {
+            for record in settings.recentProxyLaunches {
+                let menuItem = actionItem(record.displayName, #selector(launchRecentProxyApp(_:)))
+                menuItem.representedObject = record.appPath
                 submenu.addItem(menuItem)
             }
         }
@@ -610,6 +630,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         settings.vpnKeepaliveTimeoutSeconds = result.timeoutSeconds
         settings.vpnKeepaliveFailureIndicatorEnabled = result.failureIndicatorEnabled
         commitVPNKeepaliveSettings()
+    }
+
+    @objc private func launchAppWithProxyFromMenu() {
+        NSApp.activate(ignoringOtherApps: true)
+
+        let targetPanel = NSOpenPanel()
+        targetPanel.title = "Choose App to Launch with Proxy"
+        targetPanel.canChooseFiles = true
+        targetPanel.canChooseDirectories = false
+        targetPanel.allowsMultipleSelection = false
+        targetPanel.allowedContentTypes = [.applicationBundle]
+        targetPanel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        guard targetPanel.runModal() == .OK, let targetURL = targetPanel.url else { return }
+
+        launchAppWithCurrentProxy(targetURL)
+    }
+
+    @objc private func launchRecentProxyApp(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        launchAppWithCurrentProxy(URL(fileURLWithPath: path, isDirectory: true))
+    }
+
+    private func launchAppWithCurrentProxy(_ appURL: URL) {
+        do {
+            let profile = try LauncherManager.suggestedProfile(forApp: appURL)
+            let proxyConfiguration = ProxyLaunchConfiguration(
+                settings: settings,
+                profile: profile,
+                baseEnvironment: ProcessInfo.processInfo.environment
+            )
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            configuration.createsNewApplicationInstance = true
+            configuration.environment = proxyConfiguration.environment
+            configuration.arguments = proxyConfiguration.arguments
+
+            NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { [weak self] _, error in
+                DispatchQueue.main.async {
+                    if let error {
+                        self?.showError(error)
+                    } else {
+                        self?.rememberProxyLaunch(appURL: appURL, profile: profile)
+                    }
+                }
+            }
+        } catch {
+            showError(error)
+        }
     }
 
     @objc private func createLauncher() {
@@ -1086,6 +1154,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let result = PACRewriter.rewrite(original, settings: settings)
         lastPACWarnings = result.warnings
         return result.content
+    }
+
+    private func rememberProxyLaunch(appURL: URL, profile: LauncherProfile) {
+        let bundleIdentifier = try? LauncherManager.bundleIdentifier(forApp: appURL)
+        let record = QuickLaunchRecord(
+            displayName: appURL.deletingPathExtension().lastPathComponent,
+            appPath: appURL.path,
+            bundleIdentifier: bundleIdentifier,
+            launcherProfile: profile,
+            lastLaunchedAt: Date()
+        )
+        settings.rememberProxyLaunch(record)
+        do {
+            try store.saveSettings(settings)
+        } catch {
+            showError(error)
+        }
+        refreshUI()
     }
 
     private func markLauncherLaunched(path: String) {
